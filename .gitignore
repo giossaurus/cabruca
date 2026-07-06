@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+.vite/
+
+# Artefato temporário gerado pelo Vitest ao carregar a config
+*.timestamp-*.mjs
