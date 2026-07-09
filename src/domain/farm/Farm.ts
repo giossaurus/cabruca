@@ -79,10 +79,18 @@ export class Farm {
 
   constructor(config: Partial<BalanceConfig> = {}) {
     this.config = { ...DEFAULT_BALANCE, ...config };
-    this.grid = new ShadeGrid(this.config.gridWidth, this.config.gridHeight);
+    this.grid = new ShadeGrid(
+      this.config.gridWidth,
+      this.config.gridHeight,
+      this.config.treeMaturityDays,
+    );
     this.inventory = new Inventory(this.config.slotCount);
     this.indicators = new Indicators();
     this._energy = this.config.startEnergy;
+    // Cabruca herdada: nativas já maduras no cenário inicial (sem custo/deltas).
+    for (const c of this.config.initialTrees) {
+      this.grid.plantTree(c, this.config.treeMaturityDays);
+    }
   }
 
   get day(): number {

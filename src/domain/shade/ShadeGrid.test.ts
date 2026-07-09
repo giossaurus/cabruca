@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { ShadeGrid, TREE_MATURITY_DAYS } from './ShadeGrid';
+import { ShadeGrid } from './ShadeGrid';
 
-// Helper: planta uma árvore e a amadurece (avança MATURITY dias).
+// Helper: planta uma árvore e a amadurece (avança a maturidade da grade).
 function matureTreeAt(grid: ShadeGrid, x: number, y: number) {
   grid.plantTree({ x, y });
-  for (let d = 0; d < TREE_MATURITY_DAYS; d++) grid.advanceDay();
+  for (let d = 0; d < grid.maturityDays; d++) grid.advanceDay();
 }
 
 describe('ShadeGrid — ocupação', () => {
@@ -34,12 +34,19 @@ describe('ShadeGrid — maturidade da árvore', () => {
     expect(grid.shadeLevelAt({ x: 0, y: 0 })).toBe(0);
   });
 
-  it('árvore amadurece após 2 dias e passa a gerar sombra', () => {
-    const grid = new ShadeGrid(3, 3);
+  it('árvore amadurece após o período de maturidade e passa a gerar sombra', () => {
+    const grid = new ShadeGrid(3, 3, 2); // maturidade explícita = 2 (teste enxuto)
     grid.plantTree({ x: 1, y: 1 });
     grid.advanceDay(); // dia 1: ainda imatura
     expect(grid.isMatureTree({ x: 1, y: 1 })).toBe(false);
     grid.advanceDay(); // dia 2: madura
+    expect(grid.isMatureTree({ x: 1, y: 1 })).toBe(true);
+    expect(grid.shadeLevelAt({ x: 0, y: 0 })).toBe(1);
+  });
+
+  it('nativa semeada já madura (ageDays = maturidade) gera sombra de cara', () => {
+    const grid = new ShadeGrid(3, 3, 10);
+    grid.plantTree({ x: 1, y: 1 }, 10); // semeada madura
     expect(grid.isMatureTree({ x: 1, y: 1 })).toBe(true);
     expect(grid.shadeLevelAt({ x: 0, y: 0 })).toBe(1);
   });

@@ -1,7 +1,7 @@
 import { type Coord, coordKey, MOORE_NEIGHBORS } from '../types';
 
-/** Dias até uma árvore nativa amadurecer e passar a gerar sombra. */
-export const TREE_MATURITY_DAYS = 2;
+/** Dias até uma árvore nativa amadurecer e passar a gerar sombra (default). */
+export const TREE_MATURITY_DAYS = 10;
 
 export type Tile =
   | { readonly kind: 'empty' }
@@ -29,6 +29,8 @@ export class ShadeGrid {
   constructor(
     public readonly width: number,
     public readonly height: number,
+    /** Dias até uma nativa amadurecer. Tunável (ver balance.ts). */
+    public readonly maturityDays: number = TREE_MATURITY_DAYS,
   ) {
     if (width <= 0 || height <= 0) {
       throw new Error('ShadeGrid: width e height devem ser > 0');
@@ -48,10 +50,13 @@ export class ShadeGrid {
     return this.tileAt(c).kind === 'empty';
   }
 
-  /** Planta uma árvore nativa (recém-plantada, sem sombra ainda). */
-  plantTree(c: Coord): void {
+  /**
+   * Planta uma árvore nativa. Recém-plantada (ageDays 0) não gera sombra.
+   * `ageDays` permite semear nativas já maduras no início da partida.
+   */
+  plantTree(c: Coord, ageDays = 0): void {
     this.assertPlantable(c);
-    this.tiles.set(coordKey(c), { kind: 'tree', ageDays: 0 });
+    this.tiles.set(coordKey(c), { kind: 'tree', ageDays });
   }
 
   /** Planta um cacaueiro. Ocupa o tile mas não gera sombra. */
@@ -65,10 +70,10 @@ export class ShadeGrid {
     this.tiles.delete(coordKey(c));
   }
 
-  /** Uma árvore é madura quando atingiu TREE_MATURITY_DAYS de idade. */
+  /** Uma árvore é madura quando atingiu `maturityDays` de idade. */
   isMatureTree(c: Coord): boolean {
     const t = this.tileAt(c);
-    return t.kind === 'tree' && t.ageDays >= TREE_MATURITY_DAYS;
+    return t.kind === 'tree' && t.ageDays >= this.maturityDays;
   }
 
   /** Avança um dia: envelhece todas as árvores nativas. */

@@ -16,9 +16,11 @@ Analogia: pense na sombra como **Wi-Fi**. Cada árvore nativa **madura** é um r
 - `shadeLevelAt(tile)` = nº de nativas maduras nos 8 vizinhos.
   - `0` = **Sol Pleno**, `1` = **Ideal**, `2+` = **Mata Fechada**.
 - Duas árvores cobrindo o mesmo tile → nível 2.
-- Árvore recém-plantada não gera sombra; amadurece em **2 dias**.
+- Árvore recém-plantada não gera sombra; amadurece em **10 dias** (`treeMaturityDays`).
 - Recalcular ao plantar/remover árvore e ao iniciar o dia.
 - A árvore ocupa o próprio tile (bloqueia plantio de cacau ali).
+- **Mapa inicial semeado:** a partida começa com nativas **já maduras** (`initialTrees`),
+  criando zonas de sombra ideal desde o dia 1 (a cabruca é "herdada"). Sem custo nem deltas.
 
 ### 2. Cacaueiro — `Cacao`
 
@@ -37,7 +39,7 @@ Ver [ADR 0003](adr/0003-modelo-de-indicadores.md). Três valores em [0, 100], co
 
 Analogia: **estante de potes**. Cada slot é um pote que só guarda um tipo; o mesmo tipo empilha no mesmo pote. Sem pote livre para um tipo novo, o item não é coletado.
 
-- N slots (10 iniciais, a confirmar). 1 tipo por slot, empilhável.
+- N slots (**9 iniciais**). 1 tipo por slot, empilhável.
 - `add` retorna quanto foi coletado (pode ser parcial se lotar); `canAdd` consulta sem alterar.
 - `maxStack` opcional (default ilimitado) — transborda para outro slot ao exceder.
 
@@ -76,9 +78,16 @@ tile, além de energia, dia e fase (`jogando`/`vitoria`/`derrota`).
 - **Fim de jogo:** derrota imediata se algum indicador chega a 0; ao fim de `totalDays`, **vitória**
   se `allAbove(winThreshold)`, senão derrota. Ver [ADR 0003](adr/0003-modelo-de-indicadores.md).
 
-## Perguntas em aberto (do rascunho)
+## Decisões travadas (mecânicas atualizadas)
 
-- Nº de slots iniciais do inventário (10?).
-- Onde compra / onde vende / quando pode usar a loja.
-- Balanceamento inicial (deltas por ação, tempos de crescimento, preços).
-- Mecânicas de Polinização e Poda (citadas, sem regra definida).
+- Slots iniciais: **9**. Maturidade da nativa: **10 dias**. Cacau: **1 dia/estágio** (~4 dias de ciclo).
+- Colheita do cacau: **rebrota** (perene) — só o facão libera o tile. *(a implementar no refactor de Crop)*
+- Tabela de preços: seguir a **tabela detalhada** do doc (Nibs 45, Chocolate 90, Mel 30). *(a implementar)*
+- Recursos: **energia + ouro** (energia = ações/dia; ouro = expansão). *(ouro a implementar)*
+
+## Perguntas em aberto
+
+- Poda regenera a sombra com o tempo? (custo vs. profundidade)
+- Saldo inicial de ouro e duração da partida (doc deixou em branco).
+- Rega não existe hoje; "Chuva – não precisa regar" fica pendente até (se) houver rega.
+- Cooperativa: limite exato de itens/visita e bônus de preço.

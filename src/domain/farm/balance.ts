@@ -1,4 +1,5 @@
 import type { IndicatorKey } from '../indicators/Indicators';
+import type { Coord } from '../types';
 
 /**
  * Tabela de balanceamento — TODOS os números "tunáveis" do jogo num só lugar
@@ -27,6 +28,13 @@ export interface BalanceConfig {
   readonly winThreshold: number;
   /** Dias de crescimento por estágio do cacaueiro (no ideal). */
   readonly daysPerCacaoStage: number;
+  /** Dias até uma árvore nativa amadurecer e passar a gerar sombra. */
+  readonly treeMaturityDays: number;
+  /**
+   * Nativas MADURAS que já existem no mapa ao começar (cabruca "herdada").
+   * Não custam energia/ouro nem aplicam deltas — são parte do cenário inicial.
+   */
+  readonly initialTrees: ReadonlyArray<Coord>;
   /** Custo de energia por ação. */
   readonly energyCost: {
     readonly plantTree: number;
@@ -48,11 +56,24 @@ export interface BalanceConfig {
 export const DEFAULT_BALANCE: BalanceConfig = {
   gridWidth: 8,
   gridHeight: 8,
-  slotCount: 10,
+  slotCount: 9,
   startEnergy: 8,
   totalDays: 12,
   winThreshold: 40,
-  daysPerCacaoStage: 2,
+  // Cacaueiro: Muda → Jovem → Crescendo → Maduro. Com 1 dia/estágio o ciclo é
+  // curto (cozy), próximo da tabela do design (~4 dias). O estágio "crescendo"
+  // faz o papel da floração improdutiva; ficará mais fiel no refactor de Crop.
+  daysPerCacaoStage: 1,
+  // Nativa leva 10 dias para amadurecer (design atualizado). É por isso que o
+  // mapa já nasce com nativas maduras e a bananeira dá sombra provisória.
+  treeMaturityDays: 10,
+  // Zonas de "sombra ideal" prontas no início, espalhadas para não se
+  // sobreporem (nenhum tile nasce em mata fechada por causa delas).
+  initialTrees: [
+    { x: 1, y: 1 },
+    { x: 6, y: 2 },
+    { x: 3, y: 5 },
+  ],
   energyCost: {
     plantTree: 1,
     plantCacao: 1,

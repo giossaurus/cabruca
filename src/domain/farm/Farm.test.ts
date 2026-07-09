@@ -46,7 +46,7 @@ describe('Farm — energia', () => {
 
 describe('Farm — cacau × sombra', () => {
   it('no sol pleno o cacau morre após 3 dormidas', () => {
-    const farm = new Farm({ startEnergy: 20, totalDays: 20 });
+    const farm = new Farm({ startEnergy: 20, totalDays: 20, initialTrees: [] });
     farm.plantCacao({ x: 4, y: 4 }); // sem árvores por perto = sol pleno
     farm.sleep();
     farm.sleep();
@@ -56,12 +56,14 @@ describe('Farm — cacau × sombra', () => {
   });
 
   it('cresce e fica colhível sob sombra ideal', () => {
-    const farm = new Farm({ startEnergy: 40, totalDays: 40, daysPerCacaoStage: 1 });
+    const farm = new Farm({
+      startEnergy: 40, totalDays: 40, daysPerCacaoStage: 1, treeMaturityDays: 1, initialTrees: [],
+    });
     const center = { x: 4, y: 4 };
     plantTreesAround(farm, center, 1); // 1 nativa vizinha = nível 1 (ideal) quando madura
+    farm.sleep(); // nativa amadurece (maturidade 1) antes de plantar o cacau
     farm.plantCacao(center);
-    // 2 dias para a árvore amadurecer + 3 dias para o cacau (3 estágios a 1 dia)
-    for (let i = 0; i < 6; i++) farm.sleep();
+    for (let i = 0; i < 3; i++) farm.sleep(); // 3 estágios a 1 dia → maduro
     const view = farm.snapshot().tiles.find((t) => t.x === center.x && t.y === center.y);
     expect(view?.cacao?.stage).toBe('maduro');
     expect(view?.cacao?.harvestable).toBe(true);
@@ -70,11 +72,14 @@ describe('Farm — cacau × sombra', () => {
 
 describe('Farm — colheita e venda', () => {
   it('colher enche o inventário e libera o tile', () => {
-    const farm = new Farm({ startEnergy: 60, totalDays: 40, daysPerCacaoStage: 1 });
+    const farm = new Farm({
+      startEnergy: 60, totalDays: 40, daysPerCacaoStage: 1, treeMaturityDays: 1, initialTrees: [],
+    });
     const center = { x: 4, y: 4 };
     plantTreesAround(farm, center, 1);
+    farm.sleep(); // nativa amadurece antes de plantar o cacau
     farm.plantCacao(center);
-    for (let i = 0; i < 6; i++) farm.sleep();
+    for (let i = 0; i < 3; i++) farm.sleep();
     expect(farm.harvest(center)).toBe(true);
     expect(farm.inventory.count(ITEM_CACAU_FRESCO)).toBe(1);
     expect(farm.grid.isEmpty(center)).toBe(true);
