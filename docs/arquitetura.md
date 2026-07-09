@@ -51,9 +51,17 @@ working_title_gamejam/
       ├─ main.ts                # bootstrap do Phaser.Game
       ├─ assets.ts              # contrato de keys de textura (+ placeholders)
       └─ scenes/
-         ├─ BootScene.ts        # prepara/gera assets, depois inicia FarmScene
-         └─ FarmScene.ts        # render + input; delega tudo ao Farm
+         ├─ BootScene.ts        # gera assets, depois vai para o Menu
+         ├─ MenuScene.ts        # menu inicial (temporário)
+         ├─ FarmScene.ts        # render + input; delega tudo ao Farm
+         └─ PauseScene.ts       # menu de pause (lançado por cima da Farm)
+      Player.ts                 # avatar: movimento/colisão (input, não é regra)
 ```
+
+> **Player/movimento vive no adapter, não no domínio.** O avatar anda em pixels (8 direções) e age
+> no tile onde pisa; colisão só com árvores maduras. Isso é input/apresentação — coberto por QA
+> manual (ADR 0002), não por teste de unidade. O domínio (`Farm`) segue intocado e é a fonte da
+> verdade das regras.
 
 ## Estratégia de testes (SDD/TDD na prática)
 

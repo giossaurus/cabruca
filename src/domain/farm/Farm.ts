@@ -1,4 +1,4 @@
-import { type Coord, coordKey } from '../types';
+import { type Coord, coordKey, MOORE_NEIGHBORS } from '../types';
 import { ShadeGrid, type ShadeStatus } from '../shade/ShadeGrid';
 import { Cacao, type CacaoStage } from '../crop/Cacao';
 import { Inventory, type Slot } from '../inventory/Inventory';
@@ -19,6 +19,8 @@ export interface TileView {
   readonly kind: 'empty' | 'tree' | 'cacao';
   /** Só para árvore: já é madura (gera sombra)? */
   readonly matureTree: boolean;
+  /** Só para árvore: foi podada (continua existindo, mas não gera sombra)? */
+  readonly pruned: boolean;
   readonly shadeLevel: number;
   readonly shadeStatus: ShadeStatus;
   /** Só para cacau. */
@@ -135,18 +137,38 @@ export class Farm {
     return true;
   }
 
-  /** Colhe um cacaueiro maduro: gera cacau fresco e libera o tile. */
+  /**
+   * Colhe um cacaueiro maduro: gera cacau fresco e libera o tile.
+   * Rendimento = base + bônus por cada nativa PODADA adjacente (produtividade).
+   */
   harvest(c: Coord): boolean {
     const cost = this.config.energyCost.harvest;
     if (this._phase !== 'jogando' || this._energy < cost) return false;
     const cell = this.cacaos.get(coordKey(c));
     if (!cell || !cell.cacao.harvestable) return false;
+    const yield_ =
+      this.config.cacaoBaseYield +
+      this.config.cacaoPrunedBonus * this.countPrunedNeighbors(c);
     // Inventário cheio: não colhe (regra do Inventory — item não coletável).
-    if (this.inventory.add(ITEM_CACAU_FRESCO, 1) === 0) return false;
+    if (this.inventory.add(ITEM_CACAU_FRESCO, yield_) === 0) return false;
     this.grid.remove(c);
     this.cacaos.delete(coordKey(c));
     this.spend(cost);
     this.indicators.apply(this.config.deltas.harvest);
+    return true;
+  }
+
+  /**
+   * Poda uma nativa madura: deixa de gerar sombra (a árvore continua no tile),
+   * custa energia e reduz a biodiversidade. Não re-poda uma já podada.
+   */
+  prune(c: Coord): boolean {
+    const cost = this.config.energyCost.prune;
+    if (this._phase !== 'jogando' || this._energy < cost) return false;
+    if (!this.grid.isMatureTree(c) || this.grid.isPrunedTree(c)) return false;
+    this.grid.prune(c);
+    this.spend(cost);
+    this.indicators.apply(this.config.deltas.prune);
     return true;
   }
 
@@ -196,6 +218,7 @@ export class Farm {
           y,
           kind: tile.kind,
           matureTree: this.grid.isMatureTree(c),
+          pruned: this.grid.isPrunedTree(c),
           shadeLevel: this.grid.shadeLevelAt(c),
           shadeStatus: this.grid.shadeStatusAt(c),
           ...(cell
@@ -223,6 +246,16 @@ export class Farm {
   }
 
   // ─── Internos ───────────────────────────────────────────────────────────────
+
+  /** Quantas nativas PODADAS existem nos 8 vizinhos (bônus de produtividade). */
+  private countPrunedNeighbors(c: Coord): number {
+    let n = 0;
+    for (const d of MOORE_NEIGHBORS) {
+      const v = { x: c.x + d.x, y: c.y + d.y };
+      if (this.grid.inBounds(v) && this.grid.isPrunedTree(v)) n++;
+    }
+    return n;
+  }
 
   private canPlantAt(c: Coord, cost: number): boolean {
     return (

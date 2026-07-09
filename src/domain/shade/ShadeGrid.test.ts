@@ -91,3 +91,46 @@ describe('ShadeGrid — Nível de Sombra', () => {
     expect(grid.shadeLevelAt({ x: 0, y: 0 })).toBe(0);
   });
 });
+
+describe('ShadeGrid — poda', () => {
+  it('podar marca a árvore mas ela continua existindo (madura)', () => {
+    const grid = new ShadeGrid(3, 3, 2);
+    matureTreeAt(grid, 1, 1);
+    grid.prune({ x: 1, y: 1 });
+    expect(grid.isPrunedTree({ x: 1, y: 1 })).toBe(true);
+    expect(grid.isMatureTree({ x: 1, y: 1 })).toBe(true); // continua existindo
+  });
+
+  it('árvore madura podada contribui 0 para o nível de sombra', () => {
+    const grid = new ShadeGrid(3, 3, 2);
+    matureTreeAt(grid, 1, 1);
+    expect(grid.shadeLevelAt({ x: 0, y: 0 })).toBe(1);
+    grid.prune({ x: 1, y: 1 });
+    expect(grid.shadeLevelAt({ x: 0, y: 0 })).toBe(0);
+  });
+
+  it('a poda persiste ao avançar o dia (não "cura" ao dormir)', () => {
+    const grid = new ShadeGrid(3, 3, 2);
+    matureTreeAt(grid, 1, 1);
+    grid.prune({ x: 1, y: 1 });
+    grid.advanceDay();
+    expect(grid.isPrunedTree({ x: 1, y: 1 })).toBe(true);
+    expect(grid.shadeLevelAt({ x: 0, y: 0 })).toBe(0);
+  });
+
+  it('isPrunedTree é false para árvore normal, cacau e tile vazio', () => {
+    const grid = new ShadeGrid(3, 3, 2);
+    matureTreeAt(grid, 0, 0);
+    grid.plantCacao({ x: 2, y: 2 });
+    expect(grid.isPrunedTree({ x: 0, y: 0 })).toBe(false); // normal
+    expect(grid.isPrunedTree({ x: 2, y: 2 })).toBe(false); // cacau
+    expect(grid.isPrunedTree({ x: 1, y: 1 })).toBe(false); // vazio
+  });
+
+  it('podar um tile sem árvore lança erro', () => {
+    const grid = new ShadeGrid(3, 3);
+    expect(() => grid.prune({ x: 1, y: 1 })).toThrow(/árvore/);
+    grid.plantCacao({ x: 0, y: 0 });
+    expect(() => grid.prune({ x: 0, y: 0 })).toThrow(/árvore/);
+  });
+});

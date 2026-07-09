@@ -30,3 +30,20 @@ npm test           # core (Vitest)
 npm run test:watch # TDD
 npm run dev        # jogo no navegador
 ```
+
+## Controles (demo cozy)
+
+O jogador **anda** pela fazenda e age no **tile onde pisa**.
+
+| Ação | Tecla |
+|---|---|
+| Mover | **WASD** / **setas** (segure para andar) |
+| Usar ferramenta (no tile atual) | **E** ou **Espaço** |
+| Trocar ferramenta | **1** Nativa · **2** Cacau · **3** Colher (ou clicar na hotbar) |
+| Dormir (avança o dia) | **Z** (ou botão) |
+| Vender cacau | **V** (ou botão) |
+| Pausar | **ESC** |
+| Reiniciar (na tela de fim) | **R** |
+
+> Fluxo de telas: **Menu** (temporário) → **Fazenda** → **Pause** (ESC). Colisão só com árvores
+> nativas **maduras** (cacau e mudas são "pisáveis", para plantar/colher onde se pisa).

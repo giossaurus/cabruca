@@ -5,7 +5,7 @@ export const TREE_MATURITY_DAYS = 10;
 
 export type Tile =
   | { readonly kind: 'empty' }
-  | { readonly kind: 'tree'; readonly ageDays: number }
+  | { readonly kind: 'tree'; readonly ageDays: number; readonly pruned?: boolean }
   | { readonly kind: 'cacao' };
 
 const EMPTY: Tile = { kind: 'empty' };
@@ -76,22 +76,48 @@ export class ShadeGrid {
     return t.kind === 'tree' && t.ageDays >= this.maturityDays;
   }
 
-  /** Avança um dia: envelhece todas as árvores nativas. */
+  /** Árvore podada: continua existindo (bloqueia/ocupa) mas não gera sombra. */
+  isPrunedTree(c: Coord): boolean {
+    const t = this.tileAt(c);
+    return t.kind === 'tree' && t.pruned === true;
+  }
+
+  /**
+   * Poda uma árvore: marca como podada (não gera mais sombra). A árvore
+   * permanece no tile. Não valida maturidade — quem decide é o `Farm`.
+   */
+  prune(c: Coord): void {
+    this.assertInBounds(c);
+    const t = this.tileAt(c);
+    if (t.kind !== 'tree') {
+      throw new Error(`ShadeGrid: não há árvore para podar em (${c.x},${c.y})`);
+    }
+    this.tiles.set(coordKey(c), { kind: 'tree', ageDays: t.ageDays, pruned: true });
+  }
+
+  /** Avança um dia: envelhece todas as árvores nativas (preservando a poda). */
   advanceDay(): void {
     for (const [key, tile] of this.tiles) {
       if (tile.kind === 'tree') {
-        this.tiles.set(key, { kind: 'tree', ageDays: tile.ageDays + 1 });
+        this.tiles.set(key, {
+          kind: 'tree',
+          ageDays: tile.ageDays + 1,
+          ...(tile.pruned ? { pruned: true } : {}),
+        });
       }
     }
   }
 
-  /** Nível de Sombra bruto = nº de árvores nativas maduras nos 8 vizinhos. */
+  /**
+   * Nível de Sombra bruto = nº de árvores nativas maduras E NÃO PODADAS nos 8
+   * vizinhos. Árvore podada continua existindo, mas deixa de gerar sombra.
+   */
   shadeLevelAt(c: Coord): number {
     this.assertInBounds(c);
     let level = 0;
     for (const d of MOORE_NEIGHBORS) {
       const n = { x: c.x + d.x, y: c.y + d.y };
-      if (this.inBounds(n) && this.isMatureTree(n)) level++;
+      if (this.inBounds(n) && this.isMatureTree(n) && !this.isPrunedTree(n)) level++;
     }
     return level;
   }

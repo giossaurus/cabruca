@@ -4,15 +4,25 @@
 // QA exploratória manual.
 import Phaser from 'phaser';
 import { BootScene } from './scenes/BootScene';
+import { MenuScene } from './scenes/MenuScene';
 import { FarmScene } from './scenes/FarmScene';
+import { PauseScene } from './scenes/PauseScene';
+import { OptionsScene } from './scenes/OptionsScene';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   width: 960,
   height: 640,
   pixelArt: true,
+  // No Phaser 4 o default de roundPixels virou false; este é um jogo pixel art.
+  roundPixels: true,
   backgroundColor: '#1e3a24',
-  scene: [BootScene, FarmScene],
+  // Força o mixer HTML5 (streaming). A música é um loop de ~1h: no Web Audio ela
+  // seria decodificada inteira para PCM (~1 GB de RAM). Em HTML5 toca por streaming,
+  // com RAM baixa independente da duração. Ver src/game/audio.ts.
+  audio: { disableWebAudio: true },
+  // Boot → Menu → Farm; Pause/Options são lançadas por cima sob demanda.
+  scene: [BootScene, MenuScene, FarmScene, PauseScene, OptionsScene],
   scale: {
     parent: 'app',
     mode: Phaser.Scale.FIT,

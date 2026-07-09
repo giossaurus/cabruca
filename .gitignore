@@ -7,3 +7,30 @@ coverage/
 
 # Artefato temporário gerado pelo Vitest ao carregar a config
 *.timestamp-*.mjs
+
+# Env local de dev/QA (o template versionado é `.env.example`)
+.env
+.env.local
+.env.*.local
+
+# Áudios brutos na raiz (fontes de conversão). O build usa os derivados em
+# src/assets/audio/ (OGG+MP3). Ver src/game/audio.ts.
+/1h_loop_song_lofi.mp3
+/nature_ambience.mp3
+
+# Packs de arte BRUTOS na raiz (fontes). Só os PNGs efetivamente usados são
+# versionados, já recortados, em src/assets/farm-life/. Ver src/game/assets.ts.
+# (Não usar `*.mp3`: os áudios de src/assets/audio/ são versionados.)
+*.zip
+*.rar
+/Grass Tile Set by Xylini Designs/
+/Farm Life/
+# Sprites soltos de demo/efeito ainda não integrados
+/ArtificialLightGlare.png
+/BokehSpots.png
+/ExtendingLight.png
+/FreePack.png
+/GlassGlint.png
+/GlassShine.png
+/SunGlare.png
+/rain_asset.txt

@@ -30,6 +30,10 @@ export interface BalanceConfig {
   readonly daysPerCacaoStage: number;
   /** Dias até uma árvore nativa amadurecer e passar a gerar sombra. */
   readonly treeMaturityDays: number;
+  /** Rendimento base de cacau fresco por colheita. */
+  readonly cacaoBaseYield: number;
+  /** Bônus de rendimento por árvore nativa PODADA adjacente ao cacaueiro. */
+  readonly cacaoPrunedBonus: number;
   /**
    * Nativas MADURAS que já existem no mapa ao começar (cabruca "herdada").
    * Não custam energia/ouro nem aplicam deltas — são parte do cenário inicial.
@@ -40,12 +44,15 @@ export interface BalanceConfig {
     readonly plantTree: number;
     readonly plantCacao: number;
     readonly harvest: number;
+    readonly prune: number;
   };
   /** Deltas de indicador aplicados por ação. */
   readonly deltas: {
     readonly plantTree: IndicatorDelta;
     readonly plantCacao: IndicatorDelta;
     readonly harvest: IndicatorDelta;
+    /** Podar reduz a biodiversidade (a árvore fica estressada). */
+    readonly prune: IndicatorDelta;
     /** Por unidade vendida. */
     readonly sellPerUnit: IndicatorDelta;
   };
@@ -54,7 +61,9 @@ export interface BalanceConfig {
 }
 
 export const DEFAULT_BALANCE: BalanceConfig = {
-  gridWidth: 8,
+  // Talhão largo para preencher a tela (13×8). Altura 8 mantém o encaixe
+  // vertical (HUD no topo + hotbar embaixo); largura 13 usa quase toda a tela.
+  gridWidth: 13,
   gridHeight: 8,
   slotCount: 9,
   startEnergy: 8,
@@ -67,17 +76,25 @@ export const DEFAULT_BALANCE: BalanceConfig = {
   // Nativa leva 10 dias para amadurecer (design atualizado). É por isso que o
   // mapa já nasce com nativas maduras e a bananeira dá sombra provisória.
   treeMaturityDays: 10,
-  // Zonas de "sombra ideal" prontas no início, espalhadas para não se
-  // sobreporem (nenhum tile nasce em mata fechada por causa delas).
+  // Zonas de "sombra ideal" prontas no início, espalhadas pelo talhão largo
+  // para não se sobreporem (nenhum tile nasce em mata fechada por causa delas).
   initialTrees: [
-    { x: 1, y: 1 },
+    { x: 2, y: 1 },
     { x: 6, y: 2 },
-    { x: 3, y: 5 },
+    { x: 10, y: 1 },
+    { x: 3, y: 6 },
+    { x: 8, y: 5 },
+    { x: 11, y: 6 },
   ],
+  // Colheita: 1 cacau fresco por padrão; cada nativa PODADA vizinha soma +1
+  // (poda troca sombra/biodiversidade por produtividade — ver Farm.harvest).
+  cacaoBaseYield: 1,
+  cacaoPrunedBonus: 1,
   energyCost: {
     plantTree: 1,
     plantCacao: 1,
     harvest: 1,
+    prune: 1,
   },
   deltas: {
     // Plantar nativa fortalece a biodiversidade.
@@ -86,6 +103,8 @@ export const DEFAULT_BALANCE: BalanceConfig = {
     plantCacao: { biodiversidade: 1 },
     // Colher gera valor (pequeno) na economia.
     harvest: { economia: 1 },
+    // Podar estressa a árvore e reduz a biodiversidade (número de teste).
+    prune: { biodiversidade: -2 },
     // Vender: economia sobe; vender/escoar à comunidade dá um bônus menor.
     sellPerUnit: { economia: 4, comunidade: 1 },
   },

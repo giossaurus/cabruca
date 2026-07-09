@@ -5,25 +5,58 @@ import type { CacaoStage } from '../domain';
  * Contrato de KEYS de textura do jogo. O render (FarmScene) só conhece estas
  * keys — nunca de onde a imagem veio.
  *
- * Hoje as texturas são PLACEHOLDERS gerados por código (`createPlaceholderTextures`)
- * para o jogo já ser jogável/testável sem depender de arquivos. Quando o artist
- * entregar os sprites finais (ou ao baixar um pack CC0 para `src/assets/`), basta
- * trocar a geração por `scene.load.image(TextureKey.X, 'assets/x.png')` no BootScene:
- * o resto do código não muda.
+ * O visual agora vem do pack pixel-art **Farm Life** (16px, upscale ×4 via
+ * `pixelArt:true` no main.ts), recortado em `src/assets/farm-life/`. O cacau
+ * (cultura-identidade, que o pack não tem) segue desenhado por código em
+ * `createPlaceholderTextures`. As keys abaixo são carregadas no BootScene.
  */
 export const TextureKey = {
+  // Chão / terreno (PNGs 16px do pack, ladrilhados ×4).
   Grass: 'grass',
-  Dirt: 'dirt',
-  TreeSapling: 'tree_sapling',
-  TreeMature: 'tree_mature',
+  Bed: 'bed', // canteiro arado sob o cacau
+  // Vegetação (imagens únicas recortadas do pack).
+  TreeMature: 'tree_mature', // árvore nativa madura (dá sombra)
+  Seedling: 'seedling', // muda recém-plantada
+  DecorBush: 'decor_bush',
+  DecorFlower: 'decor_flower',
+  DecorStone: 'decor_stone',
+  House: 'house', // casa ao norte (entrar = transição de dia)
+  // Cacau (procedural — ver createPlaceholderTextures).
   CacaoMuda: 'cacao_muda',
   CacaoJovem: 'cacao_jovem',
   CacaoCrescendo: 'cacao_crescendo',
   CacaoMaduro: 'cacao_maduro',
   CacaoDead: 'cacao_dead',
+  // Jogador (spritesheets direcionais do pack).
+  PlayerIdle: 'player_idle',
+  PlayerWalk: 'player_walk',
+  // UI (assets custom já existentes).
+  SlotBar: 'slot_bar',
+  PodarPrata: 'podar_prata',
+  PodarPreto: 'podar_preto',
 } as const;
 
 export const TILE = 64;
+
+// ─── Jogador (spritesheets `character/idle.png` e `character/walk.png`) ───────
+// Frame 80×112 (verificado visualmente). 3 LINHAS = direções; COLUNAS = frames.
+// Linha 0 = baixo (de frente), 1 = lado (virado p/ direita), 2 = cima (de costas).
+// Esquerda = lado espelhado (flipX) — não há linha própria.
+export const PLAYER_FRAME_W = 80;
+export const PLAYER_FRAME_H = 112;
+export const PLAYER_IDLE_COLS = 2;
+export const PLAYER_WALK_COLS = 8;
+
+/** Linhas do sheet por direção "canônica" (esquerda reusa a de lado). */
+export const PlayerRow = { down: 0, side: 1, up: 2 } as const;
+export type PlayerFacing = 'down' | 'up' | 'side';
+
+/** Nome da animação (ex.: `walk_down`). Criadas no BootScene. */
+export const playerAnim = (kind: 'idle' | 'walk', facing: PlayerFacing): string => `${kind}_${facing}`;
+
+/** Footprint de COLISÃO do jogador em pixels (independente do tamanho do sprite). */
+export const PLAYER_W = 36;
+export const PLAYER_H = 48;
 
 /** Mapeia o estágio (domínio) para a key da textura correspondente. */
 export function cacaoTextureKey(stage: CacaoStage, dead: boolean): string {
@@ -41,9 +74,9 @@ export function cacaoTextureKey(stage: CacaoStage, dead: boolean): string {
 }
 
 /**
- * Gera todas as texturas placeholder (formas/cores que lêem bem). Chamado uma
- * vez no BootScene. Cada textura tem TILE×TILE com fundo transparente (exceto
- * os tiles de chão, que preenchem tudo).
+ * Gera as texturas do CACAU por código (o pack não traz cacau; manter os 5
+ * estados desenhados à mão preserva a identidade da cultura). Cada textura tem
+ * TILE×TILE com fundo transparente. Chamado uma vez no BootScene.
  */
 export function createPlaceholderTextures(scene: Phaser.Scene): void {
   const g = scene.make.graphics({ x: 0, y: 0 }, false);
@@ -54,37 +87,6 @@ export function createPlaceholderTextures(scene: Phaser.Scene): void {
     draw();
     g.generateTexture(key, S, S);
   };
-
-  // ── Chão ──────────────────────────────────────────────────────────────
-  tex(TextureKey.Grass, () => {
-    g.fillStyle(0x2e5d34, 1).fillRect(0, 0, S, S);
-    g.fillStyle(0x356b3c, 1);
-    for (let i = 0; i < 10; i++) {
-      const x = (i * 23) % S;
-      const y = (i * 41) % S;
-      g.fillRect(x, y, 3, 3);
-    }
-    g.lineStyle(1, 0x244a29, 1).strokeRect(0.5, 0.5, S - 1, S - 1);
-  });
-
-  tex(TextureKey.Dirt, () => {
-    g.fillStyle(0x6b4a2b, 1).fillRect(0, 0, S, S);
-    g.lineStyle(1, 0x4f3720, 1).strokeRect(0.5, 0.5, S - 1, S - 1);
-  });
-
-  // ── Árvore nativa ─────────────────────────────────────────────────────
-  // Recém-plantada: muda pequena.
-  tex(TextureKey.TreeSapling, () => {
-    g.fillStyle(0x6b4a2b, 1).fillRect(S / 2 - 3, S / 2 + 6, 6, 16); // tronco
-    g.fillStyle(0x4e9e57, 1).fillCircle(S / 2, S / 2, 10); // copa pequena
-  });
-  // Madura: copa grande e escura (gera sombra).
-  tex(TextureKey.TreeMature, () => {
-    g.fillStyle(0x5a3d22, 1).fillRect(S / 2 - 5, S / 2, 10, 26); // tronco
-    g.fillStyle(0x1f5c2b, 1).fillCircle(S / 2, S / 2 - 4, 26); // copa
-    g.fillStyle(0x2b7d3a, 1).fillCircle(S / 2 - 8, S / 2 - 2, 14);
-    g.fillStyle(0x2b7d3a, 1).fillCircle(S / 2 + 9, S / 2 - 6, 12);
-  });
 
   // ── Cacaueiro (estágios) ──────────────────────────────────────────────
   const stem = (h: number): void => {
