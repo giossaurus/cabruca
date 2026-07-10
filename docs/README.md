@@ -1,4 +1,4 @@
-# Referências — Game Jam "Aqui é BR" (Cabruca)
+# Referências - Game Jam "Aqui é BR" (Cabruca)
 
 Pacote de referência para a fase de desenvolvimento (05–11/07/2026). Time: dev Sr. fullstack (TS) + QA Jr.
 
