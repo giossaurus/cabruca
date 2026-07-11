@@ -12,6 +12,19 @@ const EMPTY: Tile = { kind: 'empty' };
 
 export type ShadeStatus = 'sol_pleno' | 'ideal' | 'mata_fechada';
 
+/** Um tile ocupado, com coordenada, para persistência. */
+export type ShadeTileState =
+  | { readonly x: number; readonly y: number; readonly kind: 'tree'; readonly ageDays: number; readonly pruned: boolean }
+  | { readonly x: number; readonly y: number; readonly kind: 'cacao' };
+
+/** Estado do grid p/ save: dimensões + só os tiles NÃO-vazios. */
+export interface ShadeGridState {
+  readonly width: number;
+  readonly height: number;
+  readonly maturityDays: number;
+  readonly tiles: ReadonlyArray<ShadeTileState>;
+}
+
 /**
  * Grade da fazenda responsável APENAS pela ocupação de tiles e pelo
  * cálculo do Nível de Sombra.
@@ -127,6 +140,37 @@ export class ShadeGrid {
     if (level === 0) return 'sol_pleno';
     if (level === 1) return 'ideal';
     return 'mata_fechada';
+  }
+
+  // ─── Persistência ───────────────────────────────────────────────────────────
+
+  toState(): ShadeGridState {
+    const tiles: ShadeTileState[] = [];
+    for (const [key, tile] of this.tiles) {
+      if (tile.kind === 'empty') continue;
+      const parts = key.split(',');
+      const x = Number(parts[0]);
+      const y = Number(parts[1]);
+      if (tile.kind === 'tree') {
+        tiles.push({ x, y, kind: 'tree', ageDays: tile.ageDays, pruned: tile.pruned === true });
+      } else {
+        tiles.push({ x, y, kind: 'cacao' });
+      }
+    }
+    return { width: this.width, height: this.height, maturityDays: this.maturityDays, tiles };
+  }
+
+  static fromState(s: ShadeGridState): ShadeGrid {
+    const grid = new ShadeGrid(s.width, s.height, s.maturityDays);
+    for (const t of s.tiles) {
+      const key = coordKey({ x: t.x, y: t.y });
+      if (t.kind === 'tree') {
+        grid.tiles.set(key, { kind: 'tree', ageDays: t.ageDays, ...(t.pruned ? { pruned: true } : {}) });
+      } else {
+        grid.tiles.set(key, { kind: 'cacao' });
+      }
+    }
+    return grid;
   }
 
   private assertInBounds(c: Coord): void {

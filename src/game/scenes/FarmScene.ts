@@ -7,7 +7,11 @@ import { FOREST_FLAT_KEYS, FOREST_PROP_KEYS } from '../forest';
 import { GRID_DEBUG } from '../debug';
 import { applyAccessibilitySettings, announce } from '../accessibility';
 import { UI, StatBar, Panel, Button, FocusList, keyLabel, loadSettings, normalizeKeyCode, phaserKeyName, type Settings } from '../ui';
+import { clearSave, loadFarm, writeSave } from '../save';
 import * as audio from '../audio';
+
+/** Intervalo do autosave periódico (rede de segurança além do save ao dormir). */
+const AUTOSAVE_MS = 60_000;
 
 /**
  * Cena principal (ADAPTER — Phaser). Guarda uma instância de `Farm` (o domínio),
@@ -128,8 +132,11 @@ export class FarmScene extends Phaser.Scene {
     super('FarmScene');
   }
 
-  create(): void {
-    this.farm = new Farm();
+  create(data?: { load?: boolean }): void {
+    // `load` (vindo do "Carregar jogo" do menu) tenta restaurar o save; se ele
+    // for inválido/ausente, cai para uma partida nova sem quebrar o fluxo.
+    const restored = data?.load ? loadFarm() : null;
+    this.farm = restored ?? new Farm();
     this.settings = loadSettings();
     applyAccessibilitySettings(this.settings);
     this.tool = 'tree';
@@ -149,6 +156,13 @@ export class FarmScene extends Phaser.Scene {
     // ao menu ou reiniciar via PauseScene) paramos o ambiente; a música segue.
     audio.enterGame(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => audio.stopAmbience());
+
+    // Autosave: grava já o estado inicial (assim o slot reflete SEMPRE a sessão
+    // atual, mesmo numa partida nova) e repete por timer como rede de segurança.
+    // O save principal acontece ao dormir (ver enterHouse). O timer é destruído
+    // automaticamente no shutdown/restart da cena.
+    this.autosave();
+    this.time.addEvent({ delay: AUTOSAVE_MS, loop: true, callback: () => this.autosave() });
 
     // Câmera segue o jogador dentro dos limites do mundo.
     this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
@@ -553,6 +567,7 @@ export class FarmScene extends Phaser.Scene {
       msg.setText('Descansando...');
       this.farm.sleep();
       this.redraw();
+      this.autosave(); // checkpoint natural de fim de dia
       // Sai pela porta: reposiciona logo abaixo dela p/ não reentrar em loop.
       this.player.moveTo(this.doorZone.centerX, this.doorZone.bottom + 30);
     });
@@ -1010,9 +1025,19 @@ export class FarmScene extends Phaser.Scene {
     this.scene.launch('PauseScene');
   }
 
+  /**
+   * Grava a partida enquanto está em andamento; ao terminar (vitória/derrota)
+   * apaga o save para que "Carregar jogo" não reabra uma partida encerrada.
+   */
+  private autosave(): void {
+    if (this.farm.phase === 'jogando') writeSave(this.farm);
+    else clearSave();
+  }
+
   private restart(): void {
     this.endOverlay?.destroy();
     this.endOverlay = undefined;
+    clearSave(); // reiniciar = nova partida; o create() gravará o novo estado.
     this.scene.restart();
   }
 

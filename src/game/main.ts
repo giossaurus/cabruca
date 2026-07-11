@@ -3,9 +3,11 @@
 // Esta camada NÃO é testada por unidade (ver docs/arquitetura.md) — cobrir com
 // QA exploratória manual.
 import Phaser from 'phaser';
+import { installFonts } from './font';
 import { BootScene } from './scenes/BootScene';
 import { SplashScene } from './scenes/SplashScene';
 import { MenuScene } from './scenes/MenuScene';
+import { IntroScene } from './scenes/IntroScene';
 import { FarmScene } from './scenes/FarmScene';
 import { PauseScene } from './scenes/PauseScene';
 import { OptionsScene } from './scenes/OptionsScene';
@@ -23,8 +25,8 @@ const config: Phaser.Types.Core.GameConfig = {
   // seria decodificada inteira para PCM (~1 GB de RAM). Em HTML5 toca por streaming,
   // com RAM baixa independente da duração. Ver src/game/audio.ts.
   audio: { disableWebAudio: true },
-  // Boot → Splash → Menu → Farm; Pause/Options/Credits são sobreposições.
-  scene: [BootScene, SplashScene, MenuScene, FarmScene, PauseScene, OptionsScene, CreditsScene],
+  // Boot → Splash → Menu → Intro → Farm; Pause/Options/Credits são sobreposições.
+  scene: [BootScene, SplashScene, MenuScene, IntroScene, FarmScene, PauseScene, OptionsScene, CreditsScene],
   scale: {
     parent: 'app',
     mode: Phaser.Scale.FIT,
@@ -32,4 +34,5 @@ const config: Phaser.Types.Core.GameConfig = {
   },
 };
 
+installFonts();
 new Phaser.Game(config);

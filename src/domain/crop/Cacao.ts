@@ -18,6 +18,16 @@ export const LAST_STAGE_INDEX = CACAO_STAGES.length - 1;
 export const SOL_PLENO_DEATH_DAYS = 3;
 export const DEFAULT_DAYS_PER_STAGE = 2;
 
+/** Estado interno COMPLETO para persistência (diferente de snapshot, que é render). */
+export interface CacaoState {
+  readonly baseDaysPerStage: number;
+  readonly stageIndex: number;
+  readonly progress: number;
+  readonly extraDaysThisStage: number;
+  readonly consecutiveSolPleno: number;
+  readonly dead: boolean;
+}
+
 export class Cacao {
   private stageIndex = 0;
   private progress = 0; // dias de crescimento acumulados no estágio atual
@@ -68,7 +78,7 @@ export class Cacao {
     }
   }
 
-  /** Estado serializável (para save/render). */
+  /** Projeção enxuta para render (lossy — não use para persistir). */
   snapshot() {
     return {
       stage: this.stage,
@@ -78,5 +88,28 @@ export class Cacao {
       harvestable: this.harvestable,
       consecutiveSolPleno: this.consecutiveSolPleno,
     } as const;
+  }
+
+  /** Estado interno completo p/ save (lossless). */
+  toState(): CacaoState {
+    return {
+      baseDaysPerStage: this.baseDaysPerStage,
+      stageIndex: this.stageIndex,
+      progress: this.progress,
+      extraDaysThisStage: this.extraDaysThisStage,
+      consecutiveSolPleno: this.consecutiveSolPleno,
+      dead: this._dead,
+    };
+  }
+
+  /** Reconstrói um cacaueiro a partir de um estado salvo. */
+  static fromState(s: CacaoState): Cacao {
+    const c = new Cacao(s.baseDaysPerStage);
+    c.stageIndex = s.stageIndex;
+    c.progress = s.progress;
+    c.extraDaysThisStage = s.extraDaysThisStage;
+    c.consecutiveSolPleno = s.consecutiveSolPleno;
+    c._dead = s.dead;
+    return c;
   }
 }

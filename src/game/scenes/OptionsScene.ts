@@ -176,7 +176,7 @@ export class OptionsScene extends Phaser.Scene {
       fontFamily: UI.font, fontSize: UI.size.small, color: UI.text.soft,
     }).setOrigin(0, 0.5));
     const sensitivity = new Slider(this, {
-      x: 226, y: -104, width: 160, value: this.settings.mouseSensitivity,
+      x: 196, y: -104, width: 150, value: this.settings.mouseSensitivity,
       onChange: (v) => {
         this.settings.mouseSensitivity = v;
         this.persist('Sensibilidade ajustada.');

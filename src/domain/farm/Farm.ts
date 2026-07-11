@@ -1,7 +1,7 @@
 import { type Coord, coordKey, MOORE_NEIGHBORS } from '../types';
-import { ShadeGrid, type ShadeStatus } from '../shade/ShadeGrid';
-import { Cacao, type CacaoStage } from '../crop/Cacao';
-import { Inventory, type Slot } from '../inventory/Inventory';
+import { ShadeGrid, type ShadeStatus, type ShadeGridState } from '../shade/ShadeGrid';
+import { Cacao, type CacaoStage, type CacaoState } from '../crop/Cacao';
+import { Inventory, type Slot, type InventoryState } from '../inventory/Inventory';
 import { Indicators, type IndicatorKey } from '../indicators/Indicators';
 import {
   DEFAULT_BALANCE,
@@ -47,6 +47,22 @@ interface CacaoCell {
   readonly cacao: Cacao;
 }
 
+/** Versão do formato de save. Bumpar quando o shape mudar de forma incompatível. */
+export const SAVE_VERSION = 1;
+
+/** Estado COMPLETO e serializável do jogo (lossless). Ver `Farm.toState`. */
+export interface FarmState {
+  readonly version: number;
+  readonly config: BalanceConfig;
+  readonly day: number;
+  readonly energy: number;
+  readonly phase: GamePhase;
+  readonly indicators: Record<IndicatorKey, number>;
+  readonly inventory: InventoryState;
+  readonly grid: ShadeGridState;
+  readonly cacaos: ReadonlyArray<{ readonly x: number; readonly y: number; readonly cacao: CacaoState }>;
+}
+
 /** Multiplica um delta de indicador por um fator (ex.: vender N unidades). */
 function scaleDelta(delta: IndicatorDelta, factor: number): IndicatorDelta {
   const out: IndicatorDelta = {};
@@ -79,20 +95,43 @@ export class Farm {
   private _day = 1;
   private _phase: GamePhase = 'jogando';
 
-  constructor(config: Partial<BalanceConfig> = {}) {
-    this.config = { ...DEFAULT_BALANCE, ...config };
-    this.grid = new ShadeGrid(
-      this.config.gridWidth,
-      this.config.gridHeight,
-      this.config.treeMaturityDays,
-    );
-    this.inventory = new Inventory(this.config.slotCount);
-    this.indicators = new Indicators();
-    this._energy = this.config.startEnergy;
-    // Cabruca herdada: nativas já maduras no cenário inicial (sem custo/deltas).
-    for (const c of this.config.initialTrees) {
-      this.grid.plantTree(c, this.config.treeMaturityDays);
+  /**
+   * `state` presente = restaura uma partida salva (pula o cenário inicial).
+   * Ausente = nova partida a partir de `config` mesclado sobre o default.
+   */
+  constructor(config: Partial<BalanceConfig> = {}, state?: FarmState) {
+    if (state) {
+      this.config = state.config;
+      this.grid = ShadeGrid.fromState(state.grid);
+      this.inventory = Inventory.fromState(state.inventory);
+      this.indicators = Indicators.fromState(state.indicators);
+      this._energy = state.energy;
+      this._day = state.day;
+      this._phase = state.phase;
+      for (const cell of state.cacaos) {
+        const coord = { x: cell.x, y: cell.y };
+        this.cacaos.set(coordKey(coord), { coord, cacao: Cacao.fromState(cell.cacao) });
+      }
+    } else {
+      this.config = { ...DEFAULT_BALANCE, ...config };
+      this.grid = new ShadeGrid(
+        this.config.gridWidth,
+        this.config.gridHeight,
+        this.config.treeMaturityDays,
+      );
+      this.inventory = new Inventory(this.config.slotCount);
+      this.indicators = new Indicators();
+      this._energy = this.config.startEnergy;
+      // Cabruca herdada: nativas já maduras no cenário inicial (sem custo/deltas).
+      for (const c of this.config.initialTrees) {
+        this.grid.plantTree(c, this.config.treeMaturityDays);
+      }
     }
+  }
+
+  /** Reconstrói uma partida a partir de um estado salvo. */
+  static fromState(state: FarmState): Farm {
+    return new Farm({}, state);
   }
 
   get day(): number {
@@ -257,6 +296,27 @@ export class Farm {
       indicators: this.indicators.snapshot(),
       inventory: this.inventory.slots(),
       tiles,
+    };
+  }
+
+  // ─── Persistência ─────────────────────────────────────────────────────────
+
+  /** Estado completo e serializável (lossless) para save. Ver `Farm.fromState`. */
+  toState(): FarmState {
+    const cacaos: Array<{ x: number; y: number; cacao: CacaoState }> = [];
+    for (const { coord, cacao } of this.cacaos.values()) {
+      cacaos.push({ x: coord.x, y: coord.y, cacao: cacao.toState() });
+    }
+    return {
+      version: SAVE_VERSION,
+      config: this.config,
+      day: this._day,
+      energy: this._energy,
+      phase: this._phase,
+      indicators: this.indicators.snapshot(),
+      inventory: this.inventory.toState(),
+      grid: this.grid.toState(),
+      cacaos,
     };
   }
 

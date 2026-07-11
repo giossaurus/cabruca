@@ -31,17 +31,19 @@ export class Slider extends Phaser.GameObjects.Container {
     this.onChange = cfg.onChange;
 
     const h = 8;
-    scene.add.rectangle(0, 0, w, h, UI.color.barBg).setOrigin(0, 0.5).setStrokeStyle(1, UI.color.strokeSoft);
+    const track = scene.add
+      .rectangle(0, 0, w, h, UI.color.barBg)
+      .setOrigin(0, 0.5)
+      .setStrokeStyle(1, UI.color.strokeSoft);
     this.fill = scene.add.rectangle(0, 0, w * this._value, h, UI.color.primary).setOrigin(0, 0.5);
     this.knob = scene.add
       .rectangle(w * this._value, 0, 14, 22, UI.color.primaryHover)
       .setStrokeStyle(2, UI.color.stroke);
 
-    this.add([this.fill, this.knob]);
-
     // Zona de arrasto: cobre todo o trilho + folga vertical.
     const hit = scene.add.rectangle(w / 2, 0, w + 20, 28, 0xffffff, 0.001).setInteractive({ useHandCursor: true });
-    this.add(hit);
+
+    this.add([track, this.fill, this.knob, hit]);
 
     hit.on('pointerdown', (p: Phaser.Input.Pointer) => {
       this.dragging = true;
@@ -62,8 +64,13 @@ export class Slider extends Phaser.GameObjects.Container {
   }
 
   private setFromPointer(p: Phaser.Input.Pointer): void {
-    // x local do trilho: a borda esquerda está em this.x (origin 0).
-    const local = Phaser.Math.Clamp((p.worldX - this.x) / this.trackW, 0, 1);
+    // O slider pode estar aninhado em containers (ex.: this.content centrado na
+    // tela), então this.x/this.y são coordenadas locais, não do mundo. Convertemos
+    // o ponteiro (mundo) para o espaço local do container: a borda esquerda do
+    // trilho está em x local = 0.
+    const m = this.getWorldTransformMatrix();
+    const localPoint = m.applyInverse(p.worldX, p.worldY);
+    const local = Phaser.Math.Clamp(localPoint.x / this.trackW, 0, 1);
     this.setValue(local);
   }
 

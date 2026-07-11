@@ -45,6 +45,7 @@ export const TextureKey = {
   IconPrune: 'icon_prune',
   IconSell: 'icon_sell',
   MarketStand: 'market_stand',
+  PaperPanel: 'paper_panel', // pergaminho da carta de intro (+CABRUCA)
 } as const;
 
 export const TILE = 64;

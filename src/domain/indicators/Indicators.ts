@@ -65,4 +65,14 @@ export class Indicators {
   snapshot(): Record<IndicatorKey, number> {
     return { ...this.values };
   }
+
+  /** Reconstrói a partir de valores salvos (com clamp defensivo em [0,100]). */
+  static fromState(values: Record<IndicatorKey, number>): Indicators {
+    const ind = new Indicators();
+    for (const key of INDICATOR_KEYS) {
+      const v = values[key];
+      ind.values[key] = clamp(typeof v === 'number' ? v : START);
+    }
+    return ind;
+  }
 }

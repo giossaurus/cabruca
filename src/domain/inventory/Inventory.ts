@@ -17,6 +17,14 @@ export interface Slot {
 
 export const DEFAULT_SLOT_COUNT = 10;
 
+/** Estado do inventário p/ save. */
+export interface InventoryState {
+  readonly slotCount: number;
+  /** `null` = ilimitado (Infinity não sobrevive a JSON). */
+  readonly maxStack: number | null;
+  readonly slots: ReadonlyArray<Slot | null>;
+}
+
 export class Inventory {
   private readonly slotsArr: Array<{ itemId: ItemId; qty: number } | null>;
 
@@ -104,5 +112,22 @@ export class Inventory {
 
   slots(): ReadonlyArray<Slot | null> {
     return this.slotsArr.map((s) => (s ? { itemId: s.itemId, qty: s.qty } : null));
+  }
+
+  toState(): InventoryState {
+    return {
+      slotCount: this.slotCount,
+      maxStack: Number.isFinite(this.maxStack) ? this.maxStack : null,
+      slots: this.slots(),
+    };
+  }
+
+  static fromState(s: InventoryState): Inventory {
+    const maxStack = typeof s.maxStack === 'number' && Number.isFinite(s.maxStack) ? s.maxStack : Infinity;
+    const inv = new Inventory(s.slotCount, maxStack);
+    s.slots.forEach((slot, i) => {
+      if (slot && i < inv.slotsArr.length) inv.slotsArr[i] = { itemId: slot.itemId, qty: slot.qty };
+    });
+    return inv;
   }
 }

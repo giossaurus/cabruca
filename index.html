@@ -5,11 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cabruca — Game Jam "Aqui é BR"</title>
     <style>
-      @font-face {
-        font-family: 'RoadPixel';
-        src: url('/RoadPixel.ttf') format('truetype');
-        font-display: swap;
-      }
+      /* A fonte 'RoadPixel' é registrada por JS (ver src/game/font.ts) para que a
+         URL seja relativa e funcione sob file:// no Electron. */
 
       /* Fundo das barras de letterbox quando a proporção da janela difere de 3:2.
          Preto neutro = "barra elegante" (não estica a UI, não corta a HUD). */

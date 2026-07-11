@@ -11,8 +11,12 @@ export { StatBar } from './StatBar';
 export type { StatBarConfig } from './StatBar';
 export { Panel } from './Panel';
 export type { PanelConfig } from './Panel';
+export { TextInput } from './TextInput';
+export type { TextInputConfig } from './TextInput';
 export { FocusList } from './focus';
 export type { FocusItem } from './focus';
+export { loadProfile, saveProfile, masterTitle } from './profile';
+export type { PlayerProfile, Pronoun } from './profile';
 export {
   ACTION_LABEL,
   DEFAULT_KEY_BINDINGS,

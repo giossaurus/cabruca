@@ -27,6 +27,7 @@ import menuBackgroundLargeLightUrl from '../../../Day-Large-Clouds-BG-Light-Gree
 import menuBackgroundLargeExtraLightUrl from '../../../Day-Large-Clouds-BG-Extra-Light-Green-FG.png';
 import sleepBackgroundStarryUrl from '../../../Night/Stary-BG-Light-Green-FG.png';
 import scienzaLogoUrl from '../../../Logo Scienza PNG.png';
+import paperPanelUrl from '../../../PaperUiPanelCartoony.png';
 // Trilhas de fundo (OGG preferido, MP3 fallback). Tocadas em streaming HTML5;
 // ver src/game/audio.ts e o bloco `audio` em main.ts.
 import { AudioKey } from '../audio';
@@ -68,6 +69,7 @@ export class BootScene extends Phaser.Scene {
     this.load.image(TextureKey.MenuBackgroundLargeExtraLight, menuBackgroundLargeExtraLightUrl);
     this.load.image(TextureKey.SleepBackgroundStarry, sleepBackgroundStarryUrl);
     this.load.image(TextureKey.ScienzaLogo, scienzaLogoUrl);
+    this.load.image(TextureKey.PaperPanel, paperPanelUrl);
     // Detalhes de chão de floresta (Pocket Cozy Pixels) — ambientação espalhada.
     for (const asset of FOREST_ASSETS) this.load.image(asset.key, asset.url);
     // Trilhas: array de fontes (Phaser escolhe o formato suportado). Em HTML5 o
