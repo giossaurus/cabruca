@@ -47,9 +47,6 @@ const DEPTH_TRANSITION = 5000;
 const FOG_BRUSH = 300;
 const PLAYER_FOOT_H = 14;
 
-/** A ajuda auto-abre uma vez por sessão (não a cada reinício). */
-let helpAutoShown = false;
-
 type Tool = 'tree' | 'cacao' | 'harvest' | 'prune';
 
 const SLOT_ICON = 40; // px do ícone dentro do slot
@@ -120,6 +117,8 @@ export class FarmScene extends Phaser.Scene {
   private cacauBadge!: Phaser.GameObjects.Text;
   private endOverlay: Phaser.GameObjects.Container | undefined;
   private helpOverlay: Phaser.GameObjects.Container | undefined;
+  private helpStep = 0;
+  private renderHelpStep: (() => void) | undefined;
   private saleOverlay: Phaser.GameObjects.Container | undefined;
   private saleFocus: FocusList | undefined;
   private interactionHint!: Phaser.GameObjects.Text;
@@ -138,6 +137,8 @@ export class FarmScene extends Phaser.Scene {
     this.slots = [];
     this.endOverlay = undefined;
     this.helpOverlay = undefined;
+    this.helpStep = 0;
+    this.renderHelpStep = undefined;
     this.saleOverlay = undefined;
     this.saleFocus?.destroy();
     this.saleFocus = undefined;
@@ -184,12 +185,8 @@ export class FarmScene extends Phaser.Scene {
       applyAccessibilitySettings(this.settings);
       this.rebuildMoveKeys();
     });
-
-    // Mostra a ajuda automaticamente na primeira vez da sessão (se "Mostrar dicas" ligado).
-    if (!helpAutoShown && this.settings.showTips) {
-      helpAutoShown = true;
-      this.toggleHelp();
-    }
+    // A ajuda "Como jogar" não abre mais sozinha — a carta de intro (IntroScene)
+    // faz a apresentação. O modal segue disponível pelo botão "?".
   }
 
   override update(_time: number, deltaMs: number): void {
@@ -627,51 +624,105 @@ export class FarmScene extends Phaser.Scene {
     }).setOrigin(0.5).setPadding(8, 4, 8, 4).setScrollFactor(0).setDepth(DEPTH_HELP).setAlpha(0);
   }
 
-  /** Abre/fecha o modal de ajuda (controles + mecânicas). Congela o mundo. */
+  /** Páginas do tutorial "Como jogar" (título + corpo), navegadas com setas. */
+  private helpPages(): { title: string; body: string }[] {
+    const keys = this.settings.keyBindings;
+    return [
+      {
+        title: 'Controles',
+        body:
+          `${keyLabel(keys.moveUp)}${keyLabel(keys.moveLeft)}${keyLabel(keys.moveDown)}${keyLabel(keys.moveRight)} / setas: andar\n` +
+          `${keyLabel(keys.interact)} / Espaço: usar ferramenta, dormir na porta ou vender na banca\n` +
+          '1-6: escolher item na hotbar\n' +
+          `${keyLabel(keys.replant)}: replantar/undo de nativa recém-plantada (custa 2 energia)\n` +
+          `${keyLabel(keys.pause)} / ESC: pausar/fechar\n` +
+          'Mouse: clique no chão para andar; clique nos botões e slots',
+      },
+      {
+        title: 'Lugares da fazenda',
+        body:
+          'Casa: fica ao norte e passa o dia — durma para recuperar energia.\n' +
+          'Banca: abre o menu de venda de cacau.',
+      },
+      {
+        title: 'Cacau e sombra',
+        body:
+          'Nativas maduras dão sombra aos 8 vizinhos.\n' +
+          'Cacau: sombra 1 é ideal; sol pleno mata; mata fechada atrasa.\n' +
+          'Podar troca biodiversidade por produtividade.',
+      },
+    ];
+  }
+
+  /** Abre/fecha o tutorial "Como jogar" (páginas com setas). Congela o mundo. */
   private toggleHelp(): void {
     if (this.endOverlay || this.saleOverlay) return;
     if (this.helpOverlay) {
       this.helpOverlay.destroy();
       this.helpOverlay = undefined;
+      this.renderHelpStep = undefined;
       return;
     }
+    this.helpStep = 0;
     const panelW = Math.min(560, this.scale.width - 40);
     const panelH = Math.min(430, this.scale.height - 48);
     const panel = new Panel(this, { width: panelW, height: panelH, title: 'Como jogar' });
-    const keys = this.settings.keyBindings;
+    const pages = this.helpPages();
+
     const blocker = this.add
       .rectangle(0, 0, this.scale.width, this.scale.height, 0xffffff, 0.001)
       .setInteractive();
     blocker.on('pointerdown', () => this.toggleHelp()); // clicar fora fecha
+
+    const subtitle = this.add.text(0, -panelH / 2 + 74, '', {
+      fontFamily: UI.font, fontSize: UI.size.body, color: UI.text.accent,
+    }).setOrigin(0.5);
+    const body = this.add.text(0, -6, '', {
+      fontFamily: UI.font, fontSize: UI.size.small, color: UI.text.soft,
+      align: 'left', lineSpacing: 7, wordWrap: { width: panelW - 108 },
+    }).setOrigin(0.5);
+    const indicator = this.add.text(0, panelH / 2 - 54, '', {
+      fontFamily: UI.font, fontSize: UI.size.tiny, color: UI.text.muted,
+    }).setOrigin(0.5);
+
+    const prev = new Button(this, {
+      x: -panelW / 2 + 30, y: 0, width: 40, height: 52, label: '◀',
+      fontSize: UI.size.heading, onClick: () => this.stepHelp(-1),
+    });
+    const next = new Button(this, {
+      x: panelW / 2 - 30, y: 0, width: 40, height: 52, label: '▶',
+      fontSize: UI.size.heading, onClick: () => this.stepHelp(1),
+    });
+
+    this.renderHelpStep = () => {
+      const p = pages[this.helpStep];
+      if (!p) return;
+      subtitle.setText(p.title);
+      body.setText(p.body);
+      indicator.setText(`${this.helpStep + 1} / ${pages.length}`);
+      prev.setEnabled(this.helpStep > 0);
+      next.setEnabled(this.helpStep < pages.length - 1);
+    };
+
     panel.addContent(
-      blocker,
-      this.add.text(0, -8,
-        `${keyLabel(keys.moveUp)}${keyLabel(keys.moveLeft)}${keyLabel(keys.moveDown)}${keyLabel(keys.moveRight)} / setas: andar\n` +
-      `${keyLabel(keys.interact)} / Espaço: usar ferramenta, dormir na porta ou vender na banca\n` +
-      '1-6: escolher item na hotbar\n' +
-      `${keyLabel(keys.replant)}: replantar/undo de nativa recém-plantada (custa 2 energia)\n` +
-      `${keyLabel(keys.pause)} / ESC: pausar/fechar\n` +
-      'Mouse: clique no chão para andar; clique nos botões e slots\n\n' +
-        'Casa: fica ao norte e passa o dia.\n' +
-        'Banca: abre o menu de venda de cacau.\n' +
-        'Nativas maduras dão sombra aos 8 vizinhos.\n' +
-        'Cacau: sombra 1 é ideal; sol pleno mata; mata fechada atrasa.\n' +
-        'Podar troca biodiversidade por produtividade.',
-        {
-          fontFamily: UI.font,
-          fontSize: UI.size.small,
-          color: UI.text.soft,
-          align: 'left',
-          lineSpacing: 7,
-          wordWrap: { width: panelW - 72 },
-        },
-      ).setOrigin(0.5),
-      this.add.text(0, panelH / 2 - 30, 'Clique fora ou ESC para fechar', {
+      blocker, subtitle, body, indicator, prev, next,
+      this.add.text(0, panelH / 2 - 30, 'Setas para navegar • clique fora ou ESC para fechar', {
         fontFamily: UI.font, fontSize: UI.size.tiny, color: UI.text.muted,
       }).setOrigin(0.5),
     );
     panel.setScrollFactor(0);
     this.helpOverlay = panel;
+    this.renderHelpStep();
+  }
+
+  /** Avança (+1) ou retrocede (-1) uma página do tutorial. */
+  private stepHelp(delta: number): void {
+    if (!this.helpOverlay) return;
+    const total = this.helpPages().length;
+    const next = Phaser.Math.Clamp(this.helpStep + delta, 0, total - 1);
+    if (next === this.helpStep) return;
+    this.helpStep = next;
+    this.renderHelpStep?.();
   }
 
   /** Hotbar pixel UI própria: 9 slots de ações sem PNG proprietário. */
@@ -774,6 +825,11 @@ export class FarmScene extends Phaser.Scene {
       if (event.repeat) return;
       const code = normalizeKeyCode(event);
       const keys = this.settings.keyBindings;
+      // Com o tutorial aberto, as setas ←/→ navegam entre as páginas.
+      if (this.helpOverlay && (code === 'LEFT' || code === 'RIGHT')) {
+        this.stepHelp(code === 'RIGHT' ? 1 : -1);
+        return;
+      }
       if (code === keys.interact || code === 'SPACE') this.doAction();
       else if (code === keys.sleep) this.doSleep();
       else if (code === keys.sell) this.doSell();
