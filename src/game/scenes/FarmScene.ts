@@ -42,6 +42,9 @@ interface MoveKeys {
   right: Phaser.Input.Keyboard.Key;
 }
 
+type FarmSnapshot = ReturnType<Farm['snapshot']>;
+type TileView = FarmSnapshot['tiles'][number];
+
 export class FarmScene extends Phaser.Scene {
   private farm!: Farm;
   private plot!: PlotRect;
@@ -72,8 +75,22 @@ export class FarmScene extends Phaser.Scene {
   private saleOverlay: SalesOverlay | undefined;
   private unsubscribeDeviceChange: (() => void) | undefined;
 
+  /** Snapshot do domínio no frame atual + índice O(1) de tiles por "x,y".
+   * Populados no topo de `redraw()`; toda mutação do domínio chama `redraw()`. */
+  private snap!: FarmSnapshot;
+  private tileIndex = new Map<string, TileView>();
+
   constructor() {
     super('FarmScene');
+  }
+
+  /**
+   * Guard único de "UI travada": overlays abertos ou transição de dia em curso
+   * congelam input/ações. Subconjuntos (pause/vendas/dormir) usam checagens
+   * próprias e por isso NÃO passam por aqui.
+   */
+  private get uiLocked(): boolean {
+    return Boolean(this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning);
   }
 
   create(data?: { load?: boolean }): void {
@@ -133,7 +150,7 @@ export class FarmScene extends Phaser.Scene {
       onHelp: () => this.toggleHelp(),
     });
     this.hotbar = new Hotbar(this, {
-      isUiLocked: () => Boolean(this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning),
+      isUiLocked: () => this.uiLocked,
       onToolSelected: (t) => this.setTool(t),
       onSleep: () => this.doSleep(),
       onSell: () => this.doSell(),
@@ -158,7 +175,7 @@ export class FarmScene extends Phaser.Scene {
 
   override update(_time: number, deltaMs: number): void {
     // Congela em overlays e durante a transição de dia (entrar na casa).
-    if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    if (this.uiLocked) return;
     this.player.update(deltaMs, this.readDir(), this.moveSpeedScale());
     this.dog.update(deltaMs, this.player.worldX, this.player.worldY);
     this.fog.reveal(this.player.worldX, this.player.worldY);
@@ -249,14 +266,15 @@ export class FarmScene extends Phaser.Scene {
     return '';
   }
 
-  private currentTileView(): ReturnType<Farm['snapshot']>['tiles'][number] | undefined {
+  private currentTileView(): TileView | undefined {
     if (!this.player.onPlot) return undefined;
     const c = this.player.tileCoord;
     return this.tileViewAt(c);
   }
 
-  private tileViewAt(c: { x: number; y: number }): ReturnType<Farm['snapshot']>['tiles'][number] | undefined {
-    return this.farm.snapshot().tiles.find((t) => t.x === c.x && t.y === c.y);
+  /** Lookup O(1) no índice montado em redraw() (evita snapshot().find por frame). */
+  private tileViewAt(c: { x: number; y: number }): TileView | undefined {
+    return this.tileIndex.get(`${c.x},${c.y}`);
   }
 
   private sameCoord(a: { x: number; y: number }, b: { x: number; y: number }): boolean {
@@ -274,10 +292,10 @@ export class FarmScene extends Phaser.Scene {
     return target;
   }
 
-  private treeTargetTileView(): ReturnType<Farm['snapshot']>['tiles'][number] | undefined {
+  private treeTargetTileView(): TileView | undefined {
     const c = this.treeTargetCoord();
     if (!c) return undefined;
-    return this.farm.snapshot().tiles.find((t) => t.x === c.x && t.y === c.y);
+    return this.tileViewAt(c);
   }
 
   /** Entrar na casa = dormir: tela noturna opaca, avanço de dia e amanhecer. */
@@ -395,7 +413,7 @@ export class FarmScene extends Phaser.Scene {
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (!this.settings.mouseEnabled) return;
-      if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+      if (this.uiLocked) return;
       if (pointer.y > this.scale.height - Hotbar.BAR_H - 16 || pointer.y < 42) return;
       const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
       this.mouseTarget = new Phaser.Math.Vector2(world.x, world.y);
@@ -438,7 +456,7 @@ export class FarmScene extends Phaser.Scene {
 
   /** LB/RB ciclam só as FERRAMENTAS da hotbar (Dormir/Vender têm botão próprio). */
   private cycleTool(delta: number): void {
-    if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    if (this.uiLocked) return;
     const tools: Tool[] = ['tree', 'cacao', 'harvest', 'prune'];
     const idx = tools.indexOf(this.tool);
     const next = tools[Phaser.Math.Wrap(idx + delta, 0, tools.length)];
@@ -500,7 +518,7 @@ export class FarmScene extends Phaser.Scene {
   // ─── Ações do adapter ───────────────────────────────────────────────────────
 
   private doAction(): void {
-    if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    if (this.uiLocked) return;
     if (this.nearDoor()) {
       this.enterHouse();
       return;
@@ -540,7 +558,7 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private doReplant(): void {
-    if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    if (this.uiLocked) return;
     const c = this.findReplantCandidate();
     if (!c) {
       this.hud.showToast('Nenhuma nativa recém-plantada por perto para replantar.');
@@ -566,7 +584,7 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private doSleep(): void {
-    if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    if (this.uiLocked) return;
     if (!this.nearDoor()) {
       this.hud.showToast('Vá até a porta da casa para dormir.');
       return;
@@ -575,7 +593,7 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private doSell(): void {
-    if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    if (this.uiLocked) return;
     if (!this.nearMarket()) {
       this.hud.showToast('Vá até a banca para vender cacau.');
       return;
@@ -662,7 +680,12 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private redraw(): void {
-    const s = this.farm.snapshot();
+    // Snapshot único por redraw, indexado por "x,y" para lookups O(1) no frame
+    // (tileViewAt/currentTileView/treeTargetTileView leem daqui, sem re-snapshot).
+    this.snap = this.farm.snapshot();
+    const s = this.snap;
+    this.tileIndex.clear();
+    for (const t of s.tiles) this.tileIndex.set(`${t.x},${t.y}`, t);
 
     this.plantLayer.removeAll(true);
     this.treeSprites.forEach((sp) => sp.destroy());
@@ -734,7 +757,7 @@ export class FarmScene extends Phaser.Scene {
 
   // ─── Helpers de UI ──────────────────────────────────────────────────────────
 
-  private showActionFeedback(ok: boolean, before: ReturnType<Farm['snapshot']>['tiles'][number] | undefined): void {
+  private showActionFeedback(ok: boolean, before: TileView | undefined): void {
     if (ok) {
       switch (this.tool) {
         case 'tree':
