@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { announce } from '../accessibility';
-import { Button, FocusList, UI, loadSettings } from '../ui';
+import { Button, focusButtons, UI, loadSettings } from '../ui';
 
 /**
  * Menu de pause — lançado POR CIMA da FarmScene (que fica pausada).
@@ -34,11 +34,11 @@ export class PauseScene extends Phaser.Scene {
       this.scene.start('MenuScene');
     } });
 
-    new FocusList(this, [
-      { label: 'Retomar', onFocus: (v) => resume.setFocused(v), onActivate: () => resume.activate() },
-      { label: 'Opções', onFocus: (v) => options.setFocused(v), onActivate: () => options.activate() },
-      { label: 'Reiniciar', onFocus: (v) => restart.setFocused(v), onActivate: () => restart.activate() },
-      { label: 'Voltar ao menu', onFocus: (v) => menu.setFocused(v), onActivate: () => menu.activate() },
+    focusButtons(this, [
+      { button: resume, label: 'Retomar' },
+      { button: options, label: 'Opções' },
+      { button: restart, label: 'Reiniciar' },
+      { button: menu, label: 'Voltar ao menu' },
     ], (message) => announce(loadSettings(), message), 0, () => this.resumeGame());
 
     this.input.keyboard?.on('keydown-ESC', () => this.resumeGame());

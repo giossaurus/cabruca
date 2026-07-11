@@ -4,10 +4,10 @@ import { TextureKey } from '../assets';
 import { announce } from '../accessibility';
 import {
   Button,
-  FocusList,
   Panel,
   UI,
   exemplaryFarmer,
+  focusButtons,
   keyLabel,
   loadProfile,
   masterTitle,
@@ -233,16 +233,11 @@ export function openSalesOverlay(scene: Phaser.Scene, farm: Farm, opts: SalesOve
   });
   panel.addContent(sellButton, closeButton);
 
-  const focus = new FocusList(
+  const focus = focusButtons(
     scene,
     [
-      {
-        label: qty > 0 ? 'Vender tudo' : 'Vender tudo indisponível',
-        enabled: () => sellButton.enabled,
-        onFocus: (v) => sellButton.setFocused(v),
-        onActivate: () => sellButton.activate(),
-      },
-      { label: 'Fechar vendas', onFocus: (v) => closeButton.setFocused(v), onActivate: () => closeButton.activate() },
+      { button: sellButton, label: 'Vender tudo', disabledLabel: 'Vender tudo indisponível' },
+      { button: closeButton, label: 'Fechar vendas' },
     ],
     (message) => announce(settings, message),
     0,

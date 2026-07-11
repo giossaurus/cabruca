@@ -13,8 +13,11 @@ export { Panel } from './Panel';
 export type { PanelConfig } from './Panel';
 export { TextInput } from './TextInput';
 export type { TextInputConfig } from './TextInput';
-export { FocusList } from './focus';
-export type { FocusItem } from './focus';
+// Convenção do repo: arquivos lowercase (focus.ts, menuBackground.ts) são
+// módulos de FUNÇÕES/helpers; PascalCase (Button.ts, Panel.ts) são classes de
+// widget. `focusButtons` é o helper declarativo de foco por lista de Buttons.
+export { FocusList, focusButtons } from './focus';
+export type { FocusItem, FocusButton, FocusButtonSpec } from './focus';
 export { exemplaryFarmer, loadProfile, masterTitle, prosperousTitle, saveProfile } from './profile';
 export type { PlayerProfile, Pronoun } from './profile';
 export {

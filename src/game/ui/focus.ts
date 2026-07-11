@@ -148,3 +148,39 @@ export class FocusList {
     if (item) this.announce?.(`Foco em ${item.label}`);
   }
 }
+
+/** Widget mínimo que `focusButtons` sabe focar/ativar (implementado por Button). */
+export interface FocusButton {
+  readonly enabled: boolean;
+  setFocused(focused: boolean): unknown;
+  activate(): unknown;
+}
+
+export interface FocusButtonSpec {
+  readonly button: FocusButton;
+  /** Rótulo anunciado ao focar. */
+  readonly label: string;
+  /** Rótulo alternativo anunciado quando o botão está desabilitado (a11y). */
+  readonly disabledLabel?: string;
+}
+
+/**
+ * Monta um `FocusList` a partir de uma lista de Buttons — remove o boilerplate
+ * (`{ label, enabled, onFocus, onActivate }`) repetido nas cenas de menu. Não
+ * cobre itens com onLeft/onRight (ex.: OptionsScene), que fogem do padrão.
+ */
+export function focusButtons(
+  scene: Phaser.Scene,
+  specs: readonly FocusButtonSpec[],
+  announce?: (message: string) => void,
+  initialIndex = 0,
+  onBack?: () => void,
+): FocusList {
+  const items: FocusItem[] = specs.map((spec) => ({
+    label: spec.disabledLabel !== undefined && !spec.button.enabled ? spec.disabledLabel : spec.label,
+    enabled: () => spec.button.enabled,
+    onFocus: (focused) => spec.button.setFocused(focused),
+    onActivate: () => spec.button.activate(),
+  }));
+  return new FocusList(scene, items, announce, initialIndex, onBack);
+}

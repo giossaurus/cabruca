@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { applyAccessibilitySettings, announce } from '../accessibility';
-import { Button, FocusList, loadSettings } from '../ui';
+import { Button, focusButtons, loadSettings } from '../ui';
 import { hasSave } from '../save';
 import { drawMenuBackground } from './menuBackground';
 import * as audio from '../audio';
@@ -59,11 +59,11 @@ export class MenuScene extends Phaser.Scene {
       },
     });
 
-    new FocusList(this, [
-      { label: 'Iniciar jogo', onFocus: (v) => start.setFocused(v), onActivate: () => start.activate() },
-      { label: canLoad ? 'Carregar jogo' : 'Carregar jogo indisponível', enabled: () => load.enabled, onFocus: (v) => load.setFocused(v), onActivate: () => load.activate() },
-      { label: 'Opções', onFocus: (v) => options.setFocused(v), onActivate: () => options.activate() },
-      { label: 'Créditos', onFocus: (v) => credits.setFocused(v), onActivate: () => credits.activate() },
+    focusButtons(this, [
+      { button: start, label: 'Iniciar jogo' },
+      { button: load, label: 'Carregar jogo', disabledLabel: 'Carregar jogo indisponível' },
+      { button: options, label: 'Opções' },
+      { button: credits, label: 'Créditos' },
     ], (message) => announce(loadSettings(), message));
   }
 

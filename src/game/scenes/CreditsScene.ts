@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { announce } from '../accessibility';
-import { Button, FocusList, Panel, UI, loadSettings } from '../ui';
+import { Button, Panel, UI, focusButtons, loadSettings } from '../ui';
 
 /** Créditos de equipe e atribuição dos assets externos usados no projeto. */
 export class CreditsScene extends Phaser.Scene {
@@ -66,8 +66,8 @@ export class CreditsScene extends Phaser.Scene {
     });
     panel.addContent(back);
 
-    new FocusList(this, [
-      { label: 'Voltar', onFocus: (v) => back.setFocused(v), onActivate: () => back.activate() },
+    focusButtons(this, [
+      { button: back, label: 'Voltar' },
     ], (message) => announce(loadSettings(), message), 0, () => this.close());
 
     this.input.keyboard?.once('keydown-ESC', () => this.close());
