@@ -23,7 +23,7 @@ const PRONOUNS: ReadonlyArray<{ id: Pronoun; label: string }> = [
 
 /**
  * Intro entre o menu e o jogo: sobre o MESMO fundo do menu, pergunta apelido +
- * pronome e entrega a carta do programa +CABRUCA (papel `PaperUiPanelCartoony`),
+ * pronome e entrega a carta do programa +CABRUCA (papel `paper-panel`),
  * personalizada. Confirmar a carta inicia a `FarmScene`.
  */
 export class IntroScene extends Phaser.Scene {

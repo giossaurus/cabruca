@@ -4,7 +4,7 @@
 // reescreve, quebrando sob `file://` no Electron. Importando o .ttf aqui, o Vite
 // gera uma URL relativa fingerprintada que funciona tanto no navegador quanto no
 // app empacotado. O BootScene espera esta família pronta (document.fonts.ready).
-import roadPixelUrl from '../../RoadPixel.ttf';
+import roadPixelUrl from '../assets/fonts/RoadPixel.ttf';
 
 export function installFonts(): void {
   const style = document.createElement('style');
