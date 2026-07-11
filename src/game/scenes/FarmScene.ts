@@ -7,7 +7,7 @@ import { FOREST_FLAT_KEYS, FOREST_PROP_KEYS } from '../forest';
 import { GRID_DEBUG } from '../debug';
 import { applyAccessibilitySettings, announce } from '../accessibility';
 import { UI, Panel, Button, FocusList, exemplaryFarmer, keyLabel, loadProfile, loadSettings, masterTitle, normalizeKeyCode, phaserKeyName, prosperousTitle, type ActionId, type Settings } from '../ui';
-import { PAD, activeDevice, activePadKind, buttonGlyph, noteGamepadUse, promptLabel, readPadDir } from '../gamepad';
+import { PAD, activeDevice, activePadKind, buttonGlyph, noteGamepadUse, onDeviceChange, promptLabel, readPadDir } from '../gamepad';
 import { clearSave, loadFarm, writeSave } from '../save';
 import { DEPTH } from '../depths';
 import {
@@ -72,6 +72,7 @@ export class FarmScene extends Phaser.Scene {
   private renderHelpStep: (() => void) | undefined;
   private saleOverlay: Phaser.GameObjects.Container | undefined;
   private saleFocus: FocusList | undefined;
+  private unsubscribeDeviceChange: (() => void) | undefined;
 
   constructor() {
     super('FarmScene');
@@ -99,6 +100,10 @@ export class FarmScene extends Phaser.Scene {
     // ao menu ou reiniciar via PauseScene) paramos o ambiente; a música segue.
     audio.enterGame(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => audio.stopAmbience());
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.unsubscribeDeviceChange?.();
+      this.unsubscribeDeviceChange = undefined;
+    });
 
     // Autosave: grava já o estado inicial (assim o slot reflete SEMPRE a sessão
     // atual, mesmo numa partida nova) e repete por timer como rede de segurança.
@@ -140,6 +145,11 @@ export class FarmScene extends Phaser.Scene {
       onSell: () => this.doSell(),
     });
     this.bindInput();
+    this.unsubscribeDeviceChange?.();
+    this.unsubscribeDeviceChange = onDeviceChange(() => {
+      this.updateInteractionText();
+      this.renderHelpStep?.();
+    });
     this.redraw();
     announce(this.settings, 'Jogo iniciado. Use as teclas configuradas, setas como fallback, ou clique no chão para mover.');
 
@@ -188,10 +198,28 @@ export class FarmScene extends Phaser.Scene {
     return this.saleZone.contains(this.player.worldX, this.player.worldY);
   }
 
+  /** Rótulo do prompt da ação para o dispositivo ativo (tecla ou botão do pad). */
+  private prompt(action: ActionId): string {
+    return promptLabel(action, this.settings.keyBindings);
+  }
+
+  /** Interagir tem alias fixo (Espaço) no teclado; no pad é um botão só. */
+  private interactPrompt(): string {
+    const p = this.prompt('interact');
+    return activeDevice() === 'gamepad' ? p : `${p} / Espaço`;
+  }
+
+  /** Como selecionar um slot da hotbar: número no teclado, LB/RB no pad. */
+  private slotPrompt(n: number): string {
+    if (activeDevice() !== 'gamepad') return String(n);
+    const kind = activePadKind();
+    return `${buttonGlyph(kind, PAD.lb)}/${buttonGlyph(kind, PAD.rb)}`;
+  }
+
   private updateInteractionText(): void {
     let text = '';
-    if (this.nearDoor()) text = 'E / Espaço: dormir na casa';
-    else if (this.nearMarket()) text = 'E / V: abrir vendas';
+    if (this.nearDoor()) text = `${this.interactPrompt()}: dormir na casa`;
+    else if (this.nearMarket()) text = `${this.prompt('interact')} / ${this.prompt('sell')}: abrir vendas`;
     else if (this.player.onPlot) text = this.tileActionHint();
     this.hud.setHint(text);
   }
@@ -199,25 +227,28 @@ export class FarmScene extends Phaser.Scene {
   private tileActionHint(): string {
     const tile = this.currentTileView();
     if (!tile) return '';
-    if (tile.cacao?.harvestable) return this.tool === 'harvest' ? 'E: colher cacau maduro' : '3: selecionar colheita';
+    const use = this.prompt('interact');
+    if (tile.cacao?.harvestable) {
+      return this.tool === 'harvest' ? `${use}: colher cacau maduro` : `${this.slotPrompt(3)}: selecionar colheita`;
+    }
     if (tile.cacao?.dead) return 'Cacau morto: plante outro tile';
     if (tile.cacao) return `Cacau ${tile.cacao.stage}: durma para crescer`;
     if (this.tool === 'tree') {
       const target = this.treeTargetTileView();
       if (!target) return 'Olhe para um tile do talhão para plantar';
-      return target.kind === 'empty' ? 'E: plantar nativa à frente' : 'Tile à frente ocupado';
+      return target.kind === 'empty' ? `${use}: plantar nativa à frente` : 'Tile à frente ocupado';
     }
     if (this.tool === 'cacao') {
       if (tile.kind !== 'empty') return 'Tile ocupado';
-      if (tile.shadeStatus === 'ideal') return 'E: plantar cacau (sombra ideal)';
-      if (tile.shadeStatus === 'sol_pleno') return 'E: plantar cacau (sol pleno: arriscado)';
-      return 'E: plantar cacau (mata fechada: cresce lento)';
+      if (tile.shadeStatus === 'ideal') return `${use}: plantar cacau (sombra ideal)`;
+      if (tile.shadeStatus === 'sol_pleno') return `${use}: plantar cacau (sol pleno: arriscado)`;
+      return `${use}: plantar cacau (mata fechada: cresce lento)`;
     }
     if (this.tool === 'harvest') {
       return 'Sem cacau para colher';
     }
     if (this.tool === 'prune') {
-      if (tile.kind === 'tree' && tile.matureTree && !tile.pruned) return 'E: podar nativa madura';
+      if (tile.kind === 'tree' && tile.matureTree && !tile.pruned) return `${use}: podar nativa madura`;
       if (tile.kind === 'tree' && tile.pruned) return 'Nativa ja podada';
       return 'Sem nativa madura para podar';
     }
@@ -308,19 +339,33 @@ export class FarmScene extends Phaser.Scene {
     });
   }
 
+  /** Corpo da página "Controles" quando o último input veio de um gamepad. */
+  private gamepadControlsBody(): string {
+    const g = (b: number) => buttonGlyph(activePadKind(), b);
+    return (
+      'Analógico esquerdo / ✚ direcional: andar\n' +
+      `${g(PAD.south)}: usar ferramenta, dormir na porta ou vender na banca\n` +
+      `${g(PAD.lb)}/${g(PAD.rb)}: trocar a ferramenta da hotbar\n` +
+      `${g(PAD.north)}: dormir  ·  ${g(PAD.west)}: vender  ·  ${g(PAD.lt)}: replantar/undo\n` +
+      `${g(PAD.start)}: pausar  ·  ${g(PAD.select)}: esta ajuda  ·  ${g(PAD.east)}: fechar janelas\n` +
+      'Teclado e mouse continuam funcionando em paralelo'
+    );
+  }
+
   /** Páginas do tutorial "Como jogar" (título + corpo), navegadas com setas. */
   private helpPages(): { title: string; body: string }[] {
     const keys = this.settings.keyBindings;
+    const keyboardBody =
+      `${keyLabel(keys.moveUp)}${keyLabel(keys.moveLeft)}${keyLabel(keys.moveDown)}${keyLabel(keys.moveRight)} / setas: andar\n` +
+      `${keyLabel(keys.interact)} / Espaço: usar ferramenta, dormir na porta ou vender na banca\n` +
+      '1-6: escolher item na hotbar\n' +
+      `${keyLabel(keys.replant)}: replantar/undo de nativa recém-plantada (custa 2 energia)\n` +
+      `${keyLabel(keys.pause)} / ESC: pausar/fechar\n` +
+      'Mouse: clique no chão para andar; clique nos botões e slots';
     return [
       {
         title: 'Controles',
-        body:
-          `${keyLabel(keys.moveUp)}${keyLabel(keys.moveLeft)}${keyLabel(keys.moveDown)}${keyLabel(keys.moveRight)} / setas: andar\n` +
-          `${keyLabel(keys.interact)} / Espaço: usar ferramenta, dormir na porta ou vender na banca\n` +
-          '1-6: escolher item na hotbar\n' +
-          `${keyLabel(keys.replant)}: replantar/undo de nativa recém-plantada (custa 2 energia)\n` +
-          `${keyLabel(keys.pause)} / ESC: pausar/fechar\n` +
-          'Mouse: clique no chão para andar; clique nos botões e slots',
+        body: activeDevice() === 'gamepad' ? this.gamepadControlsBody() : keyboardBody,
       },
       {
         title: 'Lugares da fazenda',
@@ -336,6 +381,26 @@ export class FarmScene extends Phaser.Scene {
           'Podar troca biodiversidade por produtividade.',
       },
     ];
+  }
+
+  /** Rodapé de navegação da ajuda, adaptado ao último dispositivo usado. */
+  private helpNavigationHint(): string {
+    if (activeDevice() !== 'gamepad') return 'Setas para navegar • clique fora ou ESC para fechar';
+    const kind = activePadKind();
+    return (
+      `${buttonGlyph(kind, PAD.dpadLeft)}/${buttonGlyph(kind, PAD.dpadRight)}: navegar • ` +
+      `${buttonGlyph(kind, PAD.east)} ou ${buttonGlyph(kind, PAD.start)}: fechar`
+    );
+  }
+
+  /** Dica de navegação da banca, adaptada ao dispositivo ativo. */
+  private salesNavigationHint(): string {
+    if (activeDevice() !== 'gamepad') return 'Use setas, Enter ou Espaço.';
+    const kind = activePadKind();
+    return (
+      `${buttonGlyph(kind, PAD.dpadUp)}/${buttonGlyph(kind, PAD.dpadDown)} navega • ` +
+      `${buttonGlyph(kind, PAD.south)} confirma • ${buttonGlyph(kind, PAD.east)} volta`
+    );
   }
 
   /** Abre/fecha o tutorial "Como jogar" (páginas com setas). Congela o mundo. */
@@ -368,6 +433,9 @@ export class FarmScene extends Phaser.Scene {
     const indicator = this.add.text(0, panelH / 2 - 54, '', {
       fontFamily: UI.font, fontSize: UI.size.tiny, color: UI.text.muted,
     }).setOrigin(0.5);
+    const navHint = this.add.text(0, panelH / 2 - 30, '', {
+      fontFamily: UI.font, fontSize: UI.size.tiny, color: UI.text.muted,
+    }).setOrigin(0.5);
 
     const prev = new Button(this, {
       x: -panelW / 2 + 30, y: 0, width: 40, height: 52, label: '◀',
@@ -384,15 +452,14 @@ export class FarmScene extends Phaser.Scene {
       subtitle.setText(p.title);
       body.setText(p.body);
       indicator.setText(`${this.helpStep + 1} / ${pages.length}`);
+      navHint.setText(this.helpNavigationHint());
       prev.setEnabled(this.helpStep > 0);
       next.setEnabled(this.helpStep < pages.length - 1);
     };
 
     panel.addContent(
       blocker, subtitle, body, indicator, prev, next,
-      this.add.text(0, panelH / 2 - 30, 'Setas para navegar • clique fora ou ESC para fechar', {
-        fontFamily: UI.font, fontSize: UI.size.tiny, color: UI.text.muted,
-      }).setOrigin(0.5),
+      navHint,
     );
     panel.setScrollFactor(0);
     this.helpOverlay = panel;
@@ -441,6 +508,14 @@ export class FarmScene extends Phaser.Scene {
 
     kb.on('keydown-R', () => this.restart());
 
+    // Gamepad: o plugin entrega "just pressed" por botão via evento 'down'.
+    // O mapa fixo botão→ação vive em gamepad.ts (GAMEPAD_BUTTON_FOR_ACTION).
+    this.input.gamepad?.on(
+      'down',
+      (pad: Phaser.Input.Gamepad.Gamepad, button: Phaser.Input.Gamepad.Button) =>
+        this.onPadButton(pad, button.index),
+    );
+
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (!this.settings.mouseEnabled) return;
       if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
@@ -448,6 +523,49 @@ export class FarmScene extends Phaser.Scene {
       const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
       this.mouseTarget = new Phaser.Math.Vector2(world.x, world.y);
     });
+  }
+
+  /**
+   * Despacho de botões do gamepad — espelha o handler de teclado, com os MESMOS
+   * guards de overlay (o menu de vendas navega pelo FocusList; aqui só fecha).
+   */
+  private onPadButton(pad: Phaser.Input.Gamepad.Gamepad, index: number): void {
+    noteGamepadUse(pad);
+    if (this.transitioning) return;
+    if (this.endOverlay) {
+      // Na tela de fim, o botão sul reinicia (equivale ao botão "Reiniciar").
+      if (index === PAD.south) this.restart();
+      return;
+    }
+    if (this.helpOverlay) {
+      if (index === PAD.dpadLeft) this.stepHelp(-1);
+      else if (index === PAD.dpadRight) this.stepHelp(1);
+      else if (index === PAD.east || index === PAD.start || index === PAD.select) this.toggleHelp();
+      return;
+    }
+    if (this.saleOverlay) {
+      if (index === PAD.east || index === PAD.start) this.toggleSales();
+      return; // confirmar/navegar ficam com o FocusList do menu de vendas
+    }
+    switch (index) {
+      case PAD.south: this.doAction(); break;
+      case PAD.west: this.doSell(); break;
+      case PAD.north: this.doSleep(); break;
+      case PAD.lt: this.doReplant(); break;
+      case PAD.lb: this.cycleTool(-1); break;
+      case PAD.rb: this.cycleTool(1); break;
+      case PAD.start: this.pauseGame(); break;
+      case PAD.select: this.toggleHelp(); break;
+    }
+  }
+
+  /** LB/RB ciclam só as FERRAMENTAS da hotbar (Dormir/Vender têm botão próprio). */
+  private cycleTool(delta: number): void {
+    if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    const tools: Tool[] = ['tree', 'cacao', 'harvest', 'prune'];
+    const idx = tools.indexOf(this.tool);
+    const next = tools[Phaser.Math.Wrap(idx + delta, 0, tools.length)];
+    if (next) this.setTool(next);
   }
 
   private rebuildMoveKeys(): void {
@@ -479,6 +597,12 @@ export class FarmScene extends Phaser.Scene {
     if (x !== 0 || y !== 0) {
       this.mouseTarget = undefined;
       return { x: Phaser.Math.Clamp(x, -1, 1), y: Phaser.Math.Clamp(y, -1, 1) };
+    }
+    // Gamepad: stick esquerdo + d-pad (clampado a 8 direções, como o teclado).
+    const pad = readPadDir(this.input.gamepad);
+    if (pad.x !== 0 || pad.y !== 0) {
+      this.mouseTarget = undefined;
+      return pad;
     }
     if (this.mouseTarget) {
       const dx = this.mouseTarget.x - this.player.worldX;
@@ -684,21 +808,27 @@ export class FarmScene extends Phaser.Scene {
     }).setEnabled(qty > 0);
     const closeButton = new Button(this, {
       x: 0, y: 136, width: 180, height: 36,
-      label: 'Fechar [ESC]',
+      label: 'Fechar',
       fontSize: UI.size.body,
       onClick: () => this.toggleSales(),
     });
     panel.addContent(sellButton, closeButton);
-    this.saleFocus = new FocusList(this, [
-      {
-        label: qty > 0 ? 'Vender tudo' : 'Vender tudo indisponível',
-        enabled: () => sellButton.enabled,
-        onFocus: (v) => sellButton.setFocused(v),
-        onActivate: () => sellButton.activate(),
-      },
-      { label: 'Fechar vendas', onFocus: (v) => closeButton.setFocused(v), onActivate: () => closeButton.activate() },
-    ], (message) => announce(this.settings, message));
-    announce(this.settings, 'Banca de vendas aberta. Use setas, Enter ou Espaço.');
+    this.saleFocus = new FocusList(
+      this,
+      [
+        {
+          label: qty > 0 ? 'Vender tudo' : 'Vender tudo indisponível',
+          enabled: () => sellButton.enabled,
+          onFocus: (v) => sellButton.setFocused(v),
+          onActivate: () => sellButton.activate(),
+        },
+        { label: 'Fechar vendas', onFocus: (v) => closeButton.setFocused(v), onActivate: () => closeButton.activate() },
+      ],
+      (message) => announce(this.settings, message),
+      0,
+      () => this.toggleSales(),
+    );
+    announce(this.settings, `Banca de vendas aberta. ${this.salesNavigationHint()}`);
     return panel;
   }
 

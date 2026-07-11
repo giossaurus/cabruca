@@ -4,6 +4,7 @@
 // QA exploratória manual.
 import Phaser from 'phaser';
 import { installFonts } from './font';
+import { initDeviceWatcher } from './gamepad';
 import { BootScene } from './scenes/BootScene';
 import { SplashScene } from './scenes/SplashScene';
 import { MenuScene } from './scenes/MenuScene';
@@ -25,6 +26,8 @@ const config: Phaser.Types.Core.GameConfig = {
   // seria decodificada inteira para PCM (~1 GB de RAM). Em HTML5 toca por streaming,
   // com RAM baixa independente da duração. Ver src/game/audio.ts.
   audio: { disableWebAudio: true },
+  // Gamepad é opt-in no Phaser. Teclado continua sempre como fallback.
+  input: { gamepad: true },
   // Boot → Splash → Menu → Intro → Farm; Pause/Options/Credits são sobreposições.
   scene: [BootScene, SplashScene, MenuScene, IntroScene, FarmScene, PauseScene, OptionsScene, CreditsScene],
   scale: {
@@ -35,4 +38,5 @@ const config: Phaser.Types.Core.GameConfig = {
 };
 
 installFonts();
+initDeviceWatcher();
 new Phaser.Game(config);

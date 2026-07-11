@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { TextureKey } from '../assets';
+import { noteGamepadUse } from '../gamepad';
 import { UI } from '../ui';
 
 /** Splash pré-menu: logo Scienza → equipe → menu. */
@@ -29,6 +30,10 @@ export class SplashScene extends Phaser.Scene {
 
     this.input.keyboard?.once('keydown', () => this.skip());
     this.input.once('pointerdown', () => this.skip());
+    this.input.gamepad?.once('down', (pad: Phaser.Input.Gamepad.Gamepad) => {
+      noteGamepadUse(pad);
+      this.skip();
+    });
 
     this.tweens.add({
       targets: logo,

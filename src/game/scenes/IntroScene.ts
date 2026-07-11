@@ -16,6 +16,7 @@ import {
 import { drawMenuBackground } from './menuBackground';
 import * as audio from '../audio';
 import { DEPTH } from '../depths';
+import { PAD, noteGamepadUse } from '../gamepad';
 
 const PRONOUNS: ReadonlyArray<{ id: Pronoun; label: string }> = [
   { id: 'ele', label: 'Ele' },
@@ -35,6 +36,8 @@ export class IntroScene extends Phaser.Scene {
   private card!: Panel;
   private chips: Array<{ id: Pronoun; bg: Phaser.GameObjects.Rectangle; text: Phaser.GameObjects.Text }> = [];
   private pronounHandler: ((e: KeyboardEvent) => void) | undefined;
+  /** true depois que a carta é exibida (o cartão de identidade já foi destruído). */
+  private onLetter = false;
 
   constructor() {
     super('IntroScene');
@@ -50,9 +53,32 @@ export class IntroScene extends Phaser.Scene {
     const saved = loadProfile();
     this.pronoun = saved.pronoun;
     this.chips = [];
+    this.onLetter = false;
 
     announce(settings, 'Antes de começar, digite como quer ser chamade e escolha seu pronome. Use as setas para o pronome e Enter para continuar.');
     this.buildIdentityCard();
+    this.bindGamepad();
+  }
+
+  /**
+   * Fallback de gamepad: sem teclado virtual (corte deliberado), o botão sul
+   * confirma com o apelido digitado ou com um padrão neutro; o d-pad cicla o
+   * pronome. Quem quiser apelido personalizado usa o teclado.
+   */
+  private bindGamepad(): void {
+    this.input.gamepad?.on(
+      'down',
+      (pad: Phaser.Input.Gamepad.Gamepad, button: Phaser.Input.Gamepad.Button) => {
+        noteGamepadUse(pad);
+        if (this.onLetter) {
+          if (button.index === PAD.south) this.scene.start('FarmScene');
+          return;
+        }
+        if (button.index === PAD.south) this.tryContinue('Cabruqueire');
+        else if (button.index === PAD.dpadLeft) this.cyclePronoun(-1);
+        else if (button.index === PAD.dpadRight) this.cyclePronoun(1);
+      },
+    );
   }
 
   private buildIdentityCard(): void {
@@ -138,6 +164,12 @@ export class IntroScene extends Phaser.Scene {
     }
   }
 
+  private cyclePronoun(dir: number): void {
+    const idx = PRONOUNS.findIndex((p) => p.id === this.pronoun);
+    const next = PRONOUNS[Phaser.Math.Wrap(idx + dir, 0, PRONOUNS.length)];
+    if (next) this.selectPronoun(next.id);
+  }
+
   /** Setas ←/→ ciclam o pronome (o TextInput ignora setas de propósito). */
   private bindPronounKeys(): void {
     if (typeof document === 'undefined') return;
@@ -146,9 +178,7 @@ export class IntroScene extends Phaser.Scene {
       const dir = e.code === 'ArrowLeft' ? -1 : e.code === 'ArrowRight' ? 1 : 0;
       if (dir === 0) return;
       e.preventDefault();
-      const idx = PRONOUNS.findIndex((p) => p.id === this.pronoun);
-      const next = PRONOUNS[Phaser.Math.Wrap(idx + dir, 0, PRONOUNS.length)];
-      if (next) this.selectPronoun(next.id);
+      this.cyclePronoun(dir);
     };
     document.addEventListener('keydown', this.pronounHandler, true);
   }
@@ -160,13 +190,14 @@ export class IntroScene extends Phaser.Scene {
     this.pronounHandler = undefined;
   }
 
-  private tryContinue(): void {
-    const nickname = this.nameInput.getValue().trim();
+  private tryContinue(fallbackNickname = ''): void {
+    const nickname = this.nameInput.getValue().trim() || fallbackNickname;
     if (nickname.length === 0) return;
     saveProfile({ nickname, pronoun: this.pronoun });
     this.unbindPronounKeys();
     this.card.destroy();
     this.chips = [];
+    this.onLetter = true;
     this.showLetter(nickname, this.pronoun);
   }
 

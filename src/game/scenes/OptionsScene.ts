@@ -130,7 +130,9 @@ export class OptionsScene extends Phaser.Scene {
       onActivate: () => back.activate(),
     });
 
-    new FocusList(this, focusItems, (message) => announce(loadSettings(), message), 0);
+    new FocusList(this, focusItems, (message) => announce(loadSettings(), message), 0, () => {
+      if (!this.waitingForKey) this.close();
+    });
     this.input.keyboard?.on('keydown-ESC', () => {
       if (!this.waitingForKey) this.close();
     });
@@ -150,7 +152,7 @@ export class OptionsScene extends Phaser.Scene {
 
   private renderCommands(): FocusItem[] {
     const focusItems: FocusItem[] = [];
-    this.content.add(this.add.text(0, -146, 'Setas sempre funcionam nos menus. No jogo, setas continuam como fallback de movimento.', {
+    this.content.add(this.add.text(0, -146, 'Setas sempre funcionam nos menus. No jogo, setas continuam como fallback de movimento. Controle (gamepad): mapa fixo de botões, sem rebind. Os prompts mudam automaticamente entre tecla e rótulos do controle.', {
       fontFamily: UI.font,
       fontSize: UI.size.small,
       color: UI.text.muted,

@@ -68,7 +68,7 @@ export class CreditsScene extends Phaser.Scene {
 
     new FocusList(this, [
       { label: 'Voltar', onFocus: (v) => back.setFocused(v), onActivate: () => back.activate() },
-    ], (message) => announce(loadSettings(), message));
+    ], (message) => announce(loadSettings(), message), 0, () => this.close());
 
     this.input.keyboard?.once('keydown-ESC', () => this.close());
   }

@@ -39,7 +39,7 @@ export class PauseScene extends Phaser.Scene {
       { label: 'Opções', onFocus: (v) => options.setFocused(v), onActivate: () => options.activate() },
       { label: 'Reiniciar', onFocus: (v) => restart.setFocused(v), onActivate: () => restart.activate() },
       { label: 'Voltar ao menu', onFocus: (v) => menu.setFocused(v), onActivate: () => menu.activate() },
-    ], (message) => announce(loadSettings(), message));
+    ], (message) => announce(loadSettings(), message), 0, () => this.resumeGame());
 
     this.input.keyboard?.on('keydown-ESC', () => this.resumeGame());
   }

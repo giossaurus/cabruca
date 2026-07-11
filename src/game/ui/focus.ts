@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { normalizeKeyCode } from './settings';
+import { PAD, noteGamepadUse } from '../gamepad';
 
 export interface FocusItem {
   readonly label: string;
@@ -13,15 +14,21 @@ export interface FocusItem {
 export class FocusList {
   private index = 0;
   private domHandler: ((e: KeyboardEvent) => void) | undefined;
+  private padHandler:
+    | ((pad: Phaser.Input.Gamepad.Gamepad, button: Phaser.Input.Gamepad.Button) => void)
+    | undefined;
 
   constructor(
     private readonly scene: Phaser.Scene,
     private readonly items: readonly FocusItem[],
     private readonly announce?: (message: string) => void,
     private readonly initialIndex = 0,
+    /** "Voltar" do gamepad (botão leste/Start) — normalmente o handler de ESC da cena. */
+    private readonly onBack?: () => void,
   ) {
     this.focusFirst();
     this.bind();
+    this.bindGamepad();
     this.scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.destroy());
   }
 
@@ -32,25 +39,50 @@ export class FocusList {
       const code = normalizeKeyCode(e);
       if (code === 'UP') {
         e.preventDefault();
-        this.move(-1);
+        this.navigate(-1);
       } else if (code === 'DOWN') {
         e.preventDefault();
-        this.move(1);
+        this.navigate(1);
       } else if (code === 'LEFT') {
         e.preventDefault();
-        this.current()?.onLeft?.();
+        this.left();
       } else if (code === 'RIGHT') {
         e.preventDefault();
-        this.current()?.onRight?.();
+        this.right();
       } else if (code === 'SPACE' || code === 'ENTER') {
         e.preventDefault();
-        this.current()?.onActivate?.();
+        this.activate();
       } else if (code === 'TAB') {
         e.preventDefault();
-        this.move(e.shiftKey ? -1 : 1);
+        this.navigate(e.shiftKey ? -1 : 1);
       }
     };
     document.addEventListener('keydown', this.domHandler, true);
+  }
+
+  /**
+   * Gamepad: d-pad move o foco/ajusta sliders, sul ativa, leste/Start voltam.
+   * Mesmo modelo do teclado — os widgets não sabem de onde veio o input.
+   */
+  private bindGamepad(): void {
+    const gp = this.scene.input.gamepad;
+    if (!gp) return;
+    this.padHandler = (pad, button) => {
+      if (!this.scene.scene.isActive(this.scene.sys.settings.key)) return;
+      noteGamepadUse(pad);
+      switch (button.index) {
+        case PAD.dpadUp: this.navigate(-1); break;
+        case PAD.dpadDown: this.navigate(1); break;
+        case PAD.dpadLeft: this.left(); break;
+        case PAD.dpadRight: this.right(); break;
+        case PAD.south: this.activate(); break;
+        case PAD.east:
+        case PAD.start:
+          this.onBack?.();
+          break;
+      }
+    };
+    gp.on('down', this.padHandler);
   }
 
   destroy(): void {
@@ -58,6 +90,27 @@ export class FocusList {
       document.removeEventListener('keydown', this.domHandler, true);
     }
     this.domHandler = undefined;
+    if (this.padHandler) {
+      this.scene.input.gamepad?.off('down', this.padHandler);
+    }
+    this.padHandler = undefined;
+  }
+
+  /** Move o foco (com wrap e pulo de desabilitados). Público p/ input externo. */
+  navigate(delta: number): void {
+    this.move(delta);
+  }
+
+  activate(): void {
+    this.current()?.onActivate?.();
+  }
+
+  left(): void {
+    this.current()?.onLeft?.();
+  }
+
+  right(): void {
+    this.current()?.onRight?.();
   }
 
   private focusFirst(): void {
