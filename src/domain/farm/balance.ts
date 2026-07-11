@@ -26,6 +26,8 @@ export interface BalanceConfig {
   readonly totalDays: number;
   /** Piso de equilíbrio: vitória exige todos os indicadores >= este valor. */
   readonly winThreshold: number;
+  /** Piso do final "Mestre": todos os indicadores >= este valor no fim. */
+  readonly masterThreshold: number;
   /** Dias de crescimento por estágio do cacaueiro (no ideal). */
   readonly daysPerCacaoStage: number;
   /** Dias até uma árvore nativa amadurecer e passar a gerar sombra. */
@@ -72,6 +74,9 @@ export const DEFAULT_BALANCE: BalanceConfig = {
   startEnergy: 8,
   totalDays: 12,
   winThreshold: 40,
+  // Final Mestre = "100% do potencial": exige os três indicadores bem acima do
+  // piso de vitória. 80 mantém alcançável em 12 dias (comunidade sobe devagar).
+  masterThreshold: 80,
   // Cacaueiro: Muda → Jovem → Crescendo → Maduro. Com 1 dia/estágio o ciclo é
   // curto (cozy), próximo da tabela do design (~4 dias). O estágio "crescendo"
   // faz o papel da floração improdutiva; ficará mais fiel no refactor de Crop.

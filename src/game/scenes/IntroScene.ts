@@ -9,6 +9,7 @@ import {
   loadProfile,
   loadSettings,
   masterTitle,
+  prosperousTitle,
   saveProfile,
   type Pronoun,
 } from '../ui';
@@ -179,7 +180,7 @@ export class IntroScene extends Phaser.Scene {
     layer.add(overlay);
 
     const paperW = 640;
-    const paperH = 460;
+    const paperH = 560; // mais alta que a carta original: lista os 3 destinos
     // NineSlice: cantos de madeira (~34px) preservados; centro de pergaminho estica.
     const paper = this.add.nineslice(cx, cy, TextureKey.PaperPanel, undefined, paperW, paperH, 34, 34, 34, 34);
     layer.add(paper);
@@ -196,8 +197,12 @@ export class IntroScene extends Phaser.Scene {
       'uma iniciativa que apoia propriedades com potencial para unir produção de cacau, ' +
       'conservação da floresta e desenvolvimento para a comunidade.\n\n' +
       'Você tem 12 dias para cuidar da sua terra, use-a com sabedoria! ' +
-      'Fortaleça a floresta e produza um cacau de qualidade.\n\n' +
-      `Se sua cabruca se tornar um exemplo de manejo sustentável, você poderá se tornar ${masterTitle(pronoun)}.`;
+      'Fortaleça a floresta, produza um cacau de qualidade e mantenha o equilíbrio.\n\n' +
+      'Ao fim do programa, sua história terá um de três destinos:\n' +
+      '• Derrota — a fazenda não resiste aos desafios;\n' +
+      `• ${prosperousTitle(pronoun)} — boa produção e uma vida estável;\n` +
+      `• ${masterTitle(pronoun)} — 100% do potencial: referência em produtividade, ` +
+      'inovação e sustentabilidade!';
 
     const text = this.add.text(cx, cy - paperH / 2 + 104, body, {
       fontFamily: UI.font,

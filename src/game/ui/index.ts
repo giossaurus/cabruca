@@ -15,7 +15,7 @@ export { TextInput } from './TextInput';
 export type { TextInputConfig } from './TextInput';
 export { FocusList } from './focus';
 export type { FocusItem } from './focus';
-export { loadProfile, saveProfile, masterTitle } from './profile';
+export { exemplaryFarmer, loadProfile, masterTitle, prosperousTitle, saveProfile } from './profile';
 export type { PlayerProfile, Pronoun } from './profile';
 export {
   ACTION_LABEL,

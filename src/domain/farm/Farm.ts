@@ -10,7 +10,8 @@ import {
   type IndicatorDelta,
 } from './balance';
 
-export type GamePhase = 'jogando' | 'vitoria' | 'derrota';
+/** `vitoria_mestre` = vitória com todos os indicadores >= `masterThreshold`. */
+export type GamePhase = 'jogando' | 'vitoria' | 'vitoria_mestre' | 'derrota';
 
 /** Visão de um tile para render (o adapter nunca acessa o estado interno). */
 export interface TileView {
@@ -101,7 +102,9 @@ export class Farm {
    */
   constructor(config: Partial<BalanceConfig> = {}, state?: FarmState) {
     if (state) {
-      this.config = state.config;
+      // Merge sobre o default: saves antigos podem não ter campos novos
+      // (ex.: `masterThreshold`) e ainda assim devem continuar jogáveis.
+      this.config = { ...DEFAULT_BALANCE, ...state.config };
       this.grid = ShadeGrid.fromState(state.grid);
       this.inventory = Inventory.fromState(state.inventory);
       this.indicators = Indicators.fromState(state.indicators);
@@ -351,9 +354,13 @@ export class Farm {
       return;
     }
     if (this._day > this.config.totalDays) {
-      this._phase = this.indicators.allAbove(this.config.winThreshold)
-        ? 'vitoria'
-        : 'derrota';
+      if (!this.indicators.allAbove(this.config.winThreshold)) {
+        this._phase = 'derrota';
+      } else {
+        this._phase = this.indicators.allAbove(this.config.masterThreshold)
+          ? 'vitoria_mestre'
+          : 'vitoria';
+      }
     }
   }
 }

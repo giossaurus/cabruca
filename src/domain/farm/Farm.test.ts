@@ -231,6 +231,18 @@ describe('Farm — fim de jogo', () => {
     expect(farm.phase).toBe('vitoria');
   });
 
+  it('vitória mestre: todos os indicadores acima do piso de mestre no fim', () => {
+    const farm = new Farm({
+      totalDays: 1,
+      winThreshold: 40,
+      masterThreshold: 50,
+      dailyDecay: {},
+      startEnergy: 5,
+    });
+    farm.sleep(); // indicadores em 50 >= masterThreshold
+    expect(farm.phase).toBe('vitoria_mestre');
+  });
+
   it('derrota: um indicador chega a zero', () => {
     const farm = new Farm({ totalDays: 20, dailyDecay: { economia: -60 }, startEnergy: 5 });
     farm.sleep(); // economia 50 -> 0

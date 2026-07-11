@@ -54,3 +54,27 @@ export function masterTitle(p: Pronoun): string {
       return 'Mestre Fazendeire';
   }
 }
+
+/** Título da vitória padrão, flexionado pelo pronome escolhido. */
+export function prosperousTitle(p: Pronoun): string {
+  switch (p) {
+    case 'ele':
+      return 'Fazendeiro Próspero';
+    case 'ela':
+      return 'Fazendeira Próspera';
+    case 'elu':
+      return 'Fazendeire Próspere';
+  }
+}
+
+/** "um fazendeiro exemplar", flexionado — usado no texto do final Mestre. */
+export function exemplaryFarmer(p: Pronoun): string {
+  switch (p) {
+    case 'ele':
+      return 'um fazendeiro exemplar';
+    case 'ela':
+      return 'uma fazendeira exemplar';
+    case 'elu':
+      return 'ume fazendeire exemplar';
+  }
+}

@@ -6,7 +6,7 @@ import { Dog } from '../Dog';
 import { FOREST_FLAT_KEYS, FOREST_PROP_KEYS } from '../forest';
 import { GRID_DEBUG } from '../debug';
 import { applyAccessibilitySettings, announce } from '../accessibility';
-import { UI, StatBar, Panel, Button, FocusList, keyLabel, loadSettings, normalizeKeyCode, phaserKeyName, type Settings } from '../ui';
+import { UI, StatBar, Panel, Button, FocusList, exemplaryFarmer, keyLabel, loadProfile, loadSettings, masterTitle, normalizeKeyCode, phaserKeyName, prosperousTitle, type Settings } from '../ui';
 import { clearSave, loadFarm, writeSave } from '../save';
 import * as audio from '../audio';
 
@@ -1218,16 +1218,39 @@ export class FarmScene extends Phaser.Scene {
     if (s.phase !== 'jogando') this.showEnd(s.phase, s.indicators);
   }
 
-  private showEnd(phase: 'vitoria' | 'derrota', indicators: Record<IndicatorKey, number>): void {
+  private showEnd(phase: 'vitoria' | 'vitoria_mestre' | 'derrota', indicators: Record<IndicatorKey, number>): void {
     if (this.endOverlay) return;
     const w = this.scale.width;
     const h = this.scale.height;
-    const won = phase === 'vitoria';
-    const titleText = won ? 'VITÓRIA' : 'DERROTA';
-    const subText = won ? 'Você prosperou mantendo o equilíbrio!' : 'O equilíbrio se rompeu.';
+    const pronoun = loadProfile().pronoun;
+    // Três finais: derrota, vitória padrão (Próspero) e Mestre (100% do potencial).
+    let titleText: string;
+    let subText: string;
+    let titleColor: string;
+    switch (phase) {
+      case 'derrota':
+        titleText = 'DERROTA';
+        subText = 'Você fez o possível, mas sua fazenda não resistiu aos desafios.';
+        titleColor = '#ff6a4d';
+        break;
+      case 'vitoria':
+        titleText = prosperousTitle(pronoun).toUpperCase();
+        subText =
+          'Sua fazenda prosperou. Você garantiu uma boa produção e uma vida estável, ' +
+          'mas ainda há potencial para ir além.';
+        titleColor = '#7be08a';
+        break;
+      case 'vitoria_mestre':
+        titleText = masterTitle(pronoun).toUpperCase();
+        subText =
+          `Você se tornou ${exemplaryFarmer(pronoun)}. Sua propriedade é referência ` +
+          'em produtividade, inovação e sustentabilidade!';
+        titleColor = '#ffd34a';
+        break;
+    }
     const bg = this.add.rectangle(w / 2, h / 2, w, h, 0x05100a, 0.85);
     const title = this.add.text(w / 2, h / 2 - 90, titleText, {
-      fontFamily: 'monospace', fontSize: UI.size.title, color: won ? '#7be08a' : '#ff6a4d',
+      fontFamily: 'monospace', fontSize: UI.size.title, color: titleColor,
     }).setOrigin(0.5);
     const sub = this.add.text(w / 2, h / 2 - 34, subText, {
         fontFamily: 'monospace', fontSize: UI.size.body, color: '#cfe3cf',
