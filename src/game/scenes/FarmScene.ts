@@ -6,7 +6,7 @@ import { Dog } from '../Dog';
 import { FOREST_FLAT_KEYS, FOREST_PROP_KEYS } from '../forest';
 import { GRID_DEBUG } from '../debug';
 import { applyAccessibilitySettings, announce } from '../accessibility';
-import { UI, Panel, Button, FocusList, exemplaryFarmer, keyLabel, loadProfile, loadSettings, masterTitle, normalizeKeyCode, phaserKeyName, prosperousTitle, type ActionId, type Settings } from '../ui';
+import { UI, loadSettings, normalizeKeyCode, phaserKeyName, type ActionId, type Settings } from '../ui';
 import { PAD, activeDevice, activePadKind, buttonGlyph, noteGamepadUse, onDeviceChange, promptLabel, readPadDir } from '../gamepad';
 import { clearSave, loadFarm, writeSave } from '../save';
 import { DEPTH } from '../depths';
@@ -16,7 +16,8 @@ import {
 } from '../world/geometry';
 import { FogOfWar, buildFarmWorld } from '../world/buildFarmWorld';
 import { Hotbar, type Tool } from '../farm/Hotbar';
-import { FarmHud, INDICATOR_META } from '../farm/FarmHud';
+import { FarmHud } from '../farm/FarmHud';
+import { openHelpOverlay, openSalesOverlay, showEndOverlay, type HelpOverlay, type SalesOverlay } from '../farm/overlays';
 import * as audio from '../audio';
 
 /** Intervalo do autosave periódico (rede de segurança além do save ao dormir). */
@@ -67,11 +68,8 @@ export class FarmScene extends Phaser.Scene {
   private hud!: FarmHud;
   private hotbar!: Hotbar;
   private endOverlay: Phaser.GameObjects.Container | undefined;
-  private helpOverlay: Phaser.GameObjects.Container | undefined;
-  private helpStep = 0;
-  private renderHelpStep: (() => void) | undefined;
-  private saleOverlay: Phaser.GameObjects.Container | undefined;
-  private saleFocus: FocusList | undefined;
+  private helpOverlay: HelpOverlay | undefined;
+  private saleOverlay: SalesOverlay | undefined;
   private unsubscribeDeviceChange: (() => void) | undefined;
 
   constructor() {
@@ -88,11 +86,7 @@ export class FarmScene extends Phaser.Scene {
     this.tool = 'tree';
     this.endOverlay = undefined;
     this.helpOverlay = undefined;
-    this.helpStep = 0;
-    this.renderHelpStep = undefined;
     this.saleOverlay = undefined;
-    this.saleFocus?.destroy();
-    this.saleFocus = undefined;
     this.obstacles = [];
     this.transitioning = false;
 
@@ -148,7 +142,7 @@ export class FarmScene extends Phaser.Scene {
     this.unsubscribeDeviceChange?.();
     this.unsubscribeDeviceChange = onDeviceChange(() => {
       this.updateInteractionText();
-      this.renderHelpStep?.();
+      this.helpOverlay?.rerender();
     });
     this.redraw();
     announce(this.settings, 'Jogo iniciado. Use as teclas configuradas, setas como fallback, ou clique no chão para mover.');
@@ -339,141 +333,24 @@ export class FarmScene extends Phaser.Scene {
     });
   }
 
-  /** Corpo da página "Controles" quando o último input veio de um gamepad. */
-  private gamepadControlsBody(): string {
-    const g = (b: number) => buttonGlyph(activePadKind(), b);
-    return (
-      'Analógico esquerdo / ✚ direcional: andar\n' +
-      `${g(PAD.south)}: usar ferramenta, dormir na porta ou vender na banca\n` +
-      `${g(PAD.lb)}/${g(PAD.rb)}: trocar a ferramenta da hotbar\n` +
-      `${g(PAD.north)}: dormir  ·  ${g(PAD.west)}: vender  ·  ${g(PAD.lt)}: replantar/undo\n` +
-      `${g(PAD.start)}: pausar  ·  ${g(PAD.select)}: esta ajuda  ·  ${g(PAD.east)}: fechar janelas\n` +
-      'Teclado e mouse continuam funcionando em paralelo'
-    );
-  }
-
-  /** Páginas do tutorial "Como jogar" (título + corpo), navegadas com setas. */
-  private helpPages(): { title: string; body: string }[] {
-    const keys = this.settings.keyBindings;
-    const keyboardBody =
-      `${keyLabel(keys.moveUp)}${keyLabel(keys.moveLeft)}${keyLabel(keys.moveDown)}${keyLabel(keys.moveRight)} / setas: andar\n` +
-      `${keyLabel(keys.interact)} / Espaço: usar ferramenta, dormir na porta ou vender na banca\n` +
-      '1-6: escolher item na hotbar\n' +
-      `${keyLabel(keys.replant)}: replantar/undo de nativa recém-plantada (custa 2 energia)\n` +
-      `${keyLabel(keys.pause)} / ESC: pausar/fechar\n` +
-      'Mouse: clique no chão para andar; clique nos botões e slots';
-    return [
-      {
-        title: 'Controles',
-        body: activeDevice() === 'gamepad' ? this.gamepadControlsBody() : keyboardBody,
-      },
-      {
-        title: 'Lugares da fazenda',
-        body:
-          'Casa: fica ao norte e passa o dia — durma para recuperar energia.\n' +
-          'Banca: abre o menu de venda de cacau.',
-      },
-      {
-        title: 'Cacau e sombra',
-        body:
-          'Nativas maduras dão sombra aos 8 vizinhos.\n' +
-          'Cacau: sombra 1 é ideal; sol pleno mata; mata fechada atrasa.\n' +
-          'Podar troca biodiversidade por produtividade.',
-      },
-    ];
-  }
-
-  /** Rodapé de navegação da ajuda, adaptado ao último dispositivo usado. */
-  private helpNavigationHint(): string {
-    if (activeDevice() !== 'gamepad') return 'Setas para navegar • clique fora ou ESC para fechar';
-    const kind = activePadKind();
-    return (
-      `${buttonGlyph(kind, PAD.dpadLeft)}/${buttonGlyph(kind, PAD.dpadRight)}: navegar • ` +
-      `${buttonGlyph(kind, PAD.east)} ou ${buttonGlyph(kind, PAD.start)}: fechar`
-    );
-  }
-
-  /** Dica de navegação da banca, adaptada ao dispositivo ativo. */
-  private salesNavigationHint(): string {
-    if (activeDevice() !== 'gamepad') return 'Use setas, Enter ou Espaço.';
-    const kind = activePadKind();
-    return (
-      `${buttonGlyph(kind, PAD.dpadUp)}/${buttonGlyph(kind, PAD.dpadDown)} navega • ` +
-      `${buttonGlyph(kind, PAD.south)} confirma • ${buttonGlyph(kind, PAD.east)} volta`
-    );
-  }
-
   /** Abre/fecha o tutorial "Como jogar" (páginas com setas). Congela o mundo. */
   private toggleHelp(): void {
     if (this.endOverlay || this.saleOverlay) return;
     if (this.helpOverlay) {
-      this.helpOverlay.destroy();
-      this.helpOverlay = undefined;
-      this.renderHelpStep = undefined;
+      this.closeHelp();
       return;
     }
-    this.helpStep = 0;
-    const panelW = Math.min(560, this.scale.width - 40);
-    const panelH = Math.min(430, this.scale.height - 48);
-    const panel = new Panel(this, { width: panelW, height: panelH, title: 'Como jogar' });
-    const pages = this.helpPages();
+    this.helpOverlay = openHelpOverlay(this, this.settings, () => this.closeHelp());
+  }
 
-    const blocker = this.add
-      .rectangle(0, 0, this.scale.width, this.scale.height, 0xffffff, 0.001)
-      .setInteractive();
-    blocker.on('pointerdown', () => this.toggleHelp()); // clicar fora fecha
-
-    const subtitle = this.add.text(0, -panelH / 2 + 74, '', {
-      fontFamily: UI.font, fontSize: UI.size.body, color: UI.text.accent,
-    }).setOrigin(0.5);
-    const body = this.add.text(0, -6, '', {
-      fontFamily: UI.font, fontSize: UI.size.small, color: UI.text.soft,
-      align: 'left', lineSpacing: 7, wordWrap: { width: panelW - 108 },
-    }).setOrigin(0.5);
-    const indicator = this.add.text(0, panelH / 2 - 54, '', {
-      fontFamily: UI.font, fontSize: UI.size.tiny, color: UI.text.muted,
-    }).setOrigin(0.5);
-    const navHint = this.add.text(0, panelH / 2 - 30, '', {
-      fontFamily: UI.font, fontSize: UI.size.tiny, color: UI.text.muted,
-    }).setOrigin(0.5);
-
-    const prev = new Button(this, {
-      x: -panelW / 2 + 30, y: 0, width: 40, height: 52, label: '◀',
-      fontSize: UI.size.heading, onClick: () => this.stepHelp(-1),
-    });
-    const next = new Button(this, {
-      x: panelW / 2 - 30, y: 0, width: 40, height: 52, label: '▶',
-      fontSize: UI.size.heading, onClick: () => this.stepHelp(1),
-    });
-
-    this.renderHelpStep = () => {
-      const p = pages[this.helpStep];
-      if (!p) return;
-      subtitle.setText(p.title);
-      body.setText(p.body);
-      indicator.setText(`${this.helpStep + 1} / ${pages.length}`);
-      navHint.setText(this.helpNavigationHint());
-      prev.setEnabled(this.helpStep > 0);
-      next.setEnabled(this.helpStep < pages.length - 1);
-    };
-
-    panel.addContent(
-      blocker, subtitle, body, indicator, prev, next,
-      navHint,
-    );
-    panel.setScrollFactor(0);
-    this.helpOverlay = panel;
-    this.renderHelpStep();
+  private closeHelp(): void {
+    this.helpOverlay?.destroy();
+    this.helpOverlay = undefined;
   }
 
   /** Avança (+1) ou retrocede (-1) uma página do tutorial. */
   private stepHelp(delta: number): void {
-    if (!this.helpOverlay) return;
-    const total = this.helpPages().length;
-    const next = Phaser.Math.Clamp(this.helpStep + delta, 0, total - 1);
-    if (next === this.helpStep) return;
-    this.helpStep = next;
-    this.renderHelpStep?.();
+    this.helpOverlay?.step(delta);
   }
 
   private bindInput(): void {
@@ -754,82 +631,22 @@ export class FarmScene extends Phaser.Scene {
       this.closeSales();
       return;
     }
-    this.saleOverlay = this.buildSalesMenu();
-  }
-
-  private closeSales(): void {
-    this.saleFocus?.destroy();
-    this.saleFocus = undefined;
-    this.saleOverlay?.destroy();
-    this.saleOverlay = undefined;
-  }
-
-  private buildSalesMenu(): Phaser.GameObjects.Container {
-    const qty = this.farm.inventory.count(ITEM_CACAU_FRESCO);
-    const panelW = Math.min(420, this.scale.width - 40);
-    const panel = new Panel(this, { width: panelW, height: 300, title: 'Banca de vendas' });
-    panel.setScrollFactor(0);
-
-    const blocker = this.add
-      .rectangle(0, 0, this.scale.width, this.scale.height, 0xffffff, 0.001)
-      .setInteractive();
-    blocker.on('pointerdown', () => this.toggleSales());
-    panel.addContent(blocker);
-
-    panel.addContent(
-      this.add.image(-92, -36, TextureKey.IconCacao).setDisplaySize(48, 48),
-      this.add.text(-44, -46, 'Cacau fresco', {
-        fontFamily: UI.font, fontSize: UI.size.body, color: UI.text.primary,
-      }).setOrigin(0, 0.5),
-      this.add.text(-44, -20, `Disponivel: x${qty}`, {
-        fontFamily: UI.font, fontSize: UI.size.small, color: UI.text.soft,
-      }).setOrigin(0, 0.5),
-      this.add.text(0, 26, 'Cada unidade aumenta Economia e Comunidade.', {
-        fontFamily: UI.font,
-        fontSize: UI.size.small,
-        color: UI.text.muted,
-        align: 'center',
-        wordWrap: { width: panelW - 64 },
-      }).setOrigin(0.5),
-    );
-
-    const sellButton = new Button(this, {
-      x: 0, y: 84, width: 220, height: 44,
-      label: 'Vender tudo',
-      variant: 'primary',
-      onClick: () => {
-        const sold = this.farm.sell(ITEM_CACAU_FRESCO, this.farm.inventory.count(ITEM_CACAU_FRESCO));
+    this.saleOverlay = openSalesOverlay(this, this.farm, {
+      settings: this.settings,
+      onClose: () => this.closeSales(),
+      onSold: (sold) => {
         this.closeSales();
         this.time.delayedCall(0, () => {
           this.redraw();
           this.hud.showToast(sold > 0 ? `Vendido: ${sold} cacau. Ciclo completo!` : 'Sem cacau para vender.');
         });
       },
-    }).setEnabled(qty > 0);
-    const closeButton = new Button(this, {
-      x: 0, y: 136, width: 180, height: 36,
-      label: 'Fechar',
-      fontSize: UI.size.body,
-      onClick: () => this.toggleSales(),
     });
-    panel.addContent(sellButton, closeButton);
-    this.saleFocus = new FocusList(
-      this,
-      [
-        {
-          label: qty > 0 ? 'Vender tudo' : 'Vender tudo indisponível',
-          enabled: () => sellButton.enabled,
-          onFocus: (v) => sellButton.setFocused(v),
-          onActivate: () => sellButton.activate(),
-        },
-        { label: 'Fechar vendas', onFocus: (v) => closeButton.setFocused(v), onActivate: () => closeButton.activate() },
-      ],
-      (message) => announce(this.settings, message),
-      0,
-      () => this.toggleSales(),
-    );
-    announce(this.settings, `Banca de vendas aberta. ${this.salesNavigationHint()}`);
-    return panel;
+  }
+
+  private closeSales(): void {
+    this.saleOverlay?.destroy();
+    this.saleOverlay = undefined;
   }
 
   // ─── Render ─────────────────────────────────────────────────────────────────
@@ -907,54 +724,12 @@ export class FarmScene extends Phaser.Scene {
 
   private showEnd(phase: 'vitoria' | 'vitoria_mestre' | 'derrota', indicators: Record<IndicatorKey, number>): void {
     if (this.endOverlay) return;
-    const w = this.scale.width;
-    const h = this.scale.height;
-    const pronoun = loadProfile().pronoun;
-    // Três finais: derrota, vitória padrão (Próspero) e Mestre (100% do potencial).
-    let titleText: string;
-    let subText: string;
-    let titleColor: string;
-    switch (phase) {
-      case 'derrota':
-        titleText = 'DERROTA';
-        subText = 'Você fez o possível, mas sua fazenda não resistiu aos desafios.';
-        titleColor = '#ff6a4d';
-        break;
-      case 'vitoria':
-        titleText = prosperousTitle(pronoun).toUpperCase();
-        subText =
-          'Sua fazenda prosperou. Você garantiu uma boa produção e uma vida estável, ' +
-          'mas ainda há potencial para ir além.';
-        titleColor = '#7be08a';
-        break;
-      case 'vitoria_mestre':
-        titleText = masterTitle(pronoun).toUpperCase();
-        subText =
-          `Você se tornou ${exemplaryFarmer(pronoun)}. Sua propriedade é referência ` +
-          'em produtividade, inovação e sustentabilidade!';
-        titleColor = '#ffd34a';
-        break;
-    }
-    const bg = this.add.rectangle(w / 2, h / 2, w, h, 0x05100a, 0.85);
-    const title = this.add.text(w / 2, h / 2 - 90, titleText, {
-      fontFamily: 'monospace', fontSize: UI.size.title, color: titleColor,
-    }).setOrigin(0.5);
-    const sub = this.add.text(w / 2, h / 2 - 34, subText, {
-        fontFamily: 'monospace', fontSize: UI.size.body, color: '#cfe3cf',
-        align: 'center', wordWrap: { width: Math.min(560, w - 64) },
-      }).setOrigin(0.5);
-    const stats = INDICATOR_META
-      .map((m) => `${m.label}: ${Math.round(indicators[m.key])}`)
-      .join('\n');
-    const statsText = this.add.text(w / 2, h / 2 + 6, stats, {
-      fontFamily: 'monospace', fontSize: UI.size.small, color: '#a9c9ac', align: 'center', lineSpacing: 4,
-    }).setOrigin(0.5);
-    const btn = this.add.text(w / 2, h / 2 + 70, '  Reiniciar [R]  ', {
-      fontFamily: 'monospace', fontSize: '20px', color: '#0d1f13', backgroundColor: '#7bd06a',
-    }).setOrigin(0.5).setPadding(8).setInteractive({ useHandCursor: true });
-    btn.on('pointerdown', () => this.restart());
-    this.endOverlay = this.add.container(0, 0, [bg, title, sub, statsText, btn]).setDepth(DEPTH.end).setScrollFactor(0);
-    announce(this.settings, `${titleText}. ${subText}. Pressione R para reiniciar.`);
+    this.endOverlay = showEndOverlay(this, {
+      phase,
+      indicators,
+      settings: this.settings,
+      onRestart: () => this.restart(),
+    });
   }
 
   // ─── Helpers de UI ──────────────────────────────────────────────────────────
