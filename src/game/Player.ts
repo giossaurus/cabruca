@@ -66,7 +66,8 @@ export class Player {
     this.sprite = scene.add
       .sprite(this.px, this.py, TextureKey.PlayerIdle, 0)
       .setDisplaySize(DISPLAY_W, DISPLAY_H)
-      .setOrigin(0.5, 0.92);
+      .setOrigin(0.5, 0.92)
+      .setDepth(this.py); // profundidade por Y desde o início (mesmo parado)
     this.setAnim('idle');
   }
 

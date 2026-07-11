@@ -98,6 +98,9 @@ export class FarmScene extends Phaser.Scene {
   private mouseTarget: Phaser.Math.Vector2 | undefined;
 
   private plantLayer!: Phaser.GameObjects.Container;
+  /** Nativas (mudas/maduras) renderizadas fora do plantLayer para ordenar por Y
+   * com o jogador. Recriadas a cada redraw; guardadas aqui p/ limpeza. */
+  private treeSprites: Phaser.GameObjects.Image[] = [];
   private shadeGfx!: Phaser.GameObjects.Graphics;
   private markerGfx!: Phaser.GameObjects.Graphics;
 
@@ -387,9 +390,10 @@ export class FarmScene extends Phaser.Scene {
     const standW = 118;
     const standH = 118;
 
+    // Só uma sombra suave no chão (sem bloco de "terra" retangular, que criava
+    // uma borda dura sobrepondo a grama/talhão).
     const g = this.add.graphics().setDepth(baseY - 3);
     g.fillStyle(0x07110a, 0.22).fillEllipse(baseX, baseY - 8, standW * 0.82, 26);
-    g.fillStyle(0x9b6b3f, 0.45).fillRoundedRect(baseX - 34, baseY - 8, 68, 68, 8);
     this.add.image(baseX, baseY, TextureKey.MarketStand)
       .setOrigin(0.5, 1)
       .setDisplaySize(standW, standH)
@@ -1070,11 +1074,15 @@ export class FarmScene extends Phaser.Scene {
     const s = this.farm.snapshot();
 
     this.plantLayer.removeAll(true);
+    this.treeSprites.forEach((sp) => sp.destroy());
+    this.treeSprites = [];
     this.shadeGfx.clear();
 
     for (const t of s.tiles) {
       const px = GRID_OX + t.x * TILE;
       const py = GRID_OY + t.y * TILE;
+      // Ordenação por Y da base (ancorada em py + TILE) com o jogador, sob o fog.
+      const baseDepth = Math.min(Math.round(py + TILE), DEPTH_FOG - 10);
 
       // Visualização da grade de sombra (tint ideal / mata fechada): só QA.
       if (GRID_DEBUG && t.kind !== 'tree') {
@@ -1085,20 +1093,23 @@ export class FarmScene extends Phaser.Scene {
       if (t.kind === 'tree') {
         if (t.matureTree) {
           // Árvore nativa madura (dá sombra). Ancorada na base do tile; copa
-          // sobe ~2,3 tiles. Aspecto do PNG mantido (111×168 ≈ 0,66).
+          // sobe ~2,3 tiles. Aspecto do PNG mantido (111×168 ≈ 0,66). Fora do
+          // plantLayer → ordena por Y com o jogador (passa atrás/na frente).
           const tree = this.add
             .image(px + TILE / 2, py + TILE, TextureKey.TreeMature)
             .setOrigin(0.5, 1)
-            .setDisplaySize(TILE * 1.5, TILE * 2.3);
+            .setDisplaySize(TILE * 1.5, TILE * 2.3)
+            .setDepth(baseDepth);
           if (t.pruned) tree.setTint(0xbfa25a); // podada: copa ressecada (não gera sombra)
-          this.plantLayer.add(tree);
+          this.treeSprites.push(tree);
         } else {
           // Muda recém-plantada = mudinha no buraco (ainda não gera sombra).
           const sap = this.add
             .image(px + TILE / 2, py + TILE * 0.95, TextureKey.Seedling)
             .setOrigin(0.5, 1)
-            .setDisplaySize(TILE * 0.42, TILE * 1.1);
-          this.plantLayer.add(sap);
+            .setDisplaySize(TILE * 0.42, TILE * 1.1)
+            .setDepth(baseDepth);
+          this.treeSprites.push(sap);
         }
       } else if (t.kind === 'cacao' && t.cacao) {
         // Canteiro arado (pack) sob o cacaueiro.
