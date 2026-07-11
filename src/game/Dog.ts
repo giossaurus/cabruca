@@ -3,7 +3,7 @@ import {
   TILE, TextureKey, DOG_FRAME_W, DOG_FRAME_H,
   DogWalkRow, DogIdleFrame, dogAnim, type DogFacing,
 } from './assets';
-import type { Bounds, PlotRect } from './Player';
+import { insidePlot, type Bounds, type PlotRect } from './world/geometry';
 
 /**
  * Cão de estimação (pack Goldie, por Artoellie) — helper da camada ADAPTER, puro
@@ -133,16 +133,9 @@ export class Dog {
       const rad = 60 + Math.random() * PLAY_RADIUS;
       const x = Phaser.Math.Clamp(ownerX + Math.cos(a) * rad, this.world.x + 20, this.world.x + this.world.w - 20);
       const y = Phaser.Math.Clamp(ownerY + Math.sin(a) * rad, this.world.y + 20, this.world.y + this.world.h - 20);
-      if (!this.insidePlot(x, y)) return { x, y };
+      if (!insidePlot(this.plot, x, y, 24)) return { x, y };
     }
     return { x: ownerX, y: ownerY };
-  }
-
-  private insidePlot(x: number, y: number): boolean {
-    return (
-      x > this.plot.ox - 24 && x < this.plot.ox + this.plot.cols * TILE + 24 &&
-      y > this.plot.oy - 24 && y < this.plot.oy + this.plot.rows * TILE + 24
-    );
   }
 
   private enterIdle(): void {

@@ -4,6 +4,7 @@ import {
   TILE, TextureKey, PLAYER_W, PLAYER_FRAME_W, PLAYER_FRAME_H,
   playerAnim, type PlayerFacing,
 } from './assets';
+import { footRect, treeTrunkRect, type Bounds, type Dir, type PlotRect } from './world/geometry';
 
 /**
  * Avatar do jogador — helper da camada ADAPTER (NÃO é domínio; movimento e
@@ -16,33 +17,10 @@ import {
  * e obstáculos fixos (ex.: a casa). Cacau e chão plantável são "pisáveis".
  */
 
-/** Talhão jogável (grade do domínio) em coordenadas de tile/pixel. */
-export interface PlotRect {
-  readonly ox: number;
-  readonly oy: number;
-  readonly cols: number;
-  readonly rows: number;
-}
-
-/** Retângulo de mundo em pixels (limites de caminhada). */
-export interface Bounds {
-  readonly x: number;
-  readonly y: number;
-  readonly w: number;
-  readonly h: number;
-}
-
-export interface Dir {
-  readonly x: number;
-  readonly y: number;
-}
-
 const SPEED = 160; // px/s
 /** Altura de exibição do avatar (~1,5 tile); largura mantém o aspecto do frame. */
 const DISPLAY_H = TILE * 1.5;
 const DISPLAY_W = DISPLAY_H * (PLAYER_FRAME_W / PLAYER_FRAME_H);
-/** Caixa de "pés" para colisão com obstáculos (ex.: casa). */
-const FOOT_H = 14;
 
 export class Player {
   readonly sprite: Phaser.GameObjects.Sprite;
@@ -153,7 +131,7 @@ export class Player {
       this.world.y + this.world.h - 4,
     );
     // Colisão com obstáculos fixos (casa): caixa dos pés no destino.
-    const foot = new Phaser.Geom.Rectangle(nx - PLAYER_W / 2, ny - FOOT_H, PLAYER_W, FOOT_H);
+    const foot = footRect(nx, ny);
     for (const o of this.obstacles) {
       if (Phaser.Geom.Rectangle.Overlaps(foot, o)) return;
     }
@@ -169,15 +147,7 @@ export class Player {
           const c = { x: xx, y: yy };
           const tile = this.farm.grid.tileAt(c);
           if (tile.kind !== 'tree') continue;
-          const mature = this.farm.grid.isMatureTree(c);
-          const trunkW = mature ? 28 : 18;
-          const trunkH = mature ? 22 : 12;
-          const trunk = new Phaser.Geom.Rectangle(
-            this.plot.ox + xx * TILE + TILE / 2 - trunkW / 2,
-            this.plot.oy + yy * TILE + TILE - trunkH,
-            trunkW,
-            trunkH,
-          );
+          const trunk = treeTrunkRect(this.plot, c, this.farm.grid.isMatureTree(c));
           if (Phaser.Geom.Rectangle.Overlaps(foot, trunk)) return;
         }
       }

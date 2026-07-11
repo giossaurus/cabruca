@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { Farm, ITEM_CACAU_FRESCO, type IndicatorKey } from '../../domain';
-import { PLAYER_W, TILE, TextureKey, cacaoTextureKey } from '../assets';
+import { TILE, TextureKey, cacaoTextureKey } from '../assets';
 import { Player } from '../Player';
 import { Dog } from '../Dog';
 import { FOREST_FLAT_KEYS, FOREST_PROP_KEYS } from '../forest';
@@ -9,6 +9,10 @@ import { applyAccessibilitySettings, announce } from '../accessibility';
 import { UI, StatBar, Panel, Button, FocusList, exemplaryFarmer, keyLabel, loadProfile, loadSettings, masterTitle, normalizeKeyCode, phaserKeyName, prosperousTitle, type Settings } from '../ui';
 import { clearSave, loadFarm, writeSave } from '../save';
 import { DEPTH } from '../depths';
+import {
+  GRID_OX, GRID_OY, WORLD_H, WORLD_W,
+  footRect, insidePlot, treeTrunkRect, type PlotRect,
+} from '../world/geometry';
 import * as audio from '../audio';
 
 /** Intervalo do autosave periódico (rede de segurança além do save ao dormir). */
@@ -26,13 +30,6 @@ const AUTOSAVE_MS = 60_000;
  * no próprio slot Cacau da hotbar.
  */
 
-// Mundo maior que a tela (960×640): a câmera segue o jogador e o mapa vai sendo
-// revelado (fog). O talhão 13×8 (13*64=832 × 8*64=512) fica centralizado na
-// horizontal e na metade inferior, deixando o norte para a casa e o cenário.
-const WORLD_W = 1920;
-const WORLD_H = 1408;
-const GRID_OX = Math.round((WORLD_W - 13 * 64) / 2); // 544
-const GRID_OY = 768; // espaço ao norte para casa/cenário
 /** Medidas da hotbar pixel UI própria (sem PNG externo). */
 const SLOT_SIZE = 56;
 const SLOT_GAP = 4;
@@ -43,7 +40,6 @@ const SLOT_BAR_H = SLOT_SIZE + SLOT_PAD * 2;
 
 /** Diâmetro do "pincel" que apaga a névoa ao redor do jogador (raio ~150px). */
 const FOG_BRUSH = 300;
-const PLAYER_FOOT_H = 14;
 
 type Tool = 'tree' | 'cacao' | 'harvest' | 'prune';
 
@@ -85,6 +81,7 @@ interface MoveKeys {
 
 export class FarmScene extends Phaser.Scene {
   private farm!: Farm;
+  private plot!: PlotRect;
   private settings!: Settings;
   private tool: Tool = 'tree';
   private player!: Player;
@@ -160,6 +157,7 @@ export class FarmScene extends Phaser.Scene {
 
     // Câmera segue o jogador dentro dos limites do mundo.
     this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
+    this.plot = { ox: GRID_OX, oy: GRID_OY, cols: this.farm.grid.width, rows: this.farm.grid.height };
 
     this.drawGrassBackground();
     this.drawPlantableGround();
@@ -172,12 +170,11 @@ export class FarmScene extends Phaser.Scene {
     this.markerGfx = this.add.graphics().setDepth(1);
 
     // Jogador anda por TODO o mundo; interage só quando pisa no talhão.
-    const plot = { ox: GRID_OX, oy: GRID_OY, cols: this.farm.grid.width, rows: this.farm.grid.height };
     const world = { x: 0, y: 0, w: WORLD_W, h: WORLD_H };
-    this.player = new Player(this, this.farm, plot, world, this.obstacles);
+    this.player = new Player(this, this.farm, this.plot, world, this.obstacles);
     this.cameras.main.startFollow(this.player.sprite, true, 0.12, 0.12);
     // Cão de estimação: brinca pelo cenário e segue o dono (pura ambientação).
-    this.dog = new Dog(this, world, plot, this.player.worldX + 74, this.player.worldY + 34);
+    this.dog = new Dog(this, world, this.plot, this.player.worldX + 74, this.player.worldY + 34);
 
     this.buildFog();
     this.buildHud();
@@ -272,13 +269,6 @@ export class FarmScene extends Phaser.Scene {
    * fixas (pseudo-aleatórias por semente) para leitura estável entre sessões.
    */
   private buildDecorations(): void {
-    const plotL = GRID_OX;
-    const plotR = GRID_OX + this.farm.grid.width * TILE;
-    const plotT = GRID_OY;
-    const plotB = GRID_OY + this.farm.grid.height * TILE;
-    const insidePlot = (x: number, y: number): boolean =>
-      x > plotL - 40 && x < plotR + 40 && y > plotT - 40 && y < plotB + 40;
-
     const keys = [TextureKey.DecorBush, TextureKey.DecorStone, TextureKey.DecorFlower];
     const reserved = [
       new Phaser.Geom.Rectangle(this.doorZone.x - 190, this.doorZone.y - 140, this.doorZone.width + 380, 330),
@@ -290,7 +280,7 @@ export class FarmScene extends Phaser.Scene {
     for (let i = 0; i < 90; i++) {
       const x = 40 + rnd() * (WORLD_W - 80);
       const y = 60 + rnd() * (WORLD_H - 100);
-      if (insidePlot(x, y)) continue; // não polui a área jogável
+      if (insidePlot(this.plot, x, y, 40)) continue; // não polui a área jogável
       const key = keys[Math.floor(rnd() * keys.length)]!;
       const scale = key === TextureKey.DecorFlower ? 2.6 + rnd() * 1.2 : 3 + rnd() * 1.4;
       const hitW = key === TextureKey.DecorBush ? 22 * scale : 18 * scale;
@@ -313,13 +303,6 @@ export class FarmScene extends Phaser.Scene {
    * repetir as posições do decor; determinístico entre sessões.
    */
   private scatterForestDetails(): void {
-    const plotL = GRID_OX;
-    const plotR = GRID_OX + this.farm.grid.width * TILE;
-    const plotT = GRID_OY;
-    const plotB = GRID_OY + this.farm.grid.height * TILE;
-    // Buffer maior que o decor: nada de detalhe encostando nos tiles de cacau.
-    const insidePlot = (x: number, y: number): boolean =>
-      x > plotL - 48 && x < plotR + 48 && y > plotT - 48 && y < plotB + 48;
     const reserved = [
       new Phaser.Geom.Rectangle(this.doorZone.x - 190, this.doorZone.y - 140, this.doorZone.width + 380, 330),
       new Phaser.Geom.Rectangle(this.saleZone.x - 130, this.saleZone.y - 120, this.saleZone.width + 260, 250),
@@ -334,7 +317,8 @@ export class FarmScene extends Phaser.Scene {
     const place = (key: string, flat: boolean): void => {
       const x = 30 + rnd() * (WORLD_W - 60);
       const y = 50 + rnd() * (WORLD_H - 80);
-      if (insidePlot(x, y)) return;
+      // Buffer maior que o decor (48 vs 40): nada encostando nos tiles de cacau.
+      if (insidePlot(this.plot, x, y, 48)) return;
       const src = this.textures.get(key).getSourceImage();
       const targetH = flat ? 52 + rnd() * 28 : 40 + rnd() * 30;
       const s = targetH / src.height;
@@ -969,30 +953,14 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private nudgePlayerAwayFromTree(c: { x: number; y: number }): void {
-    const foot = new Phaser.Geom.Rectangle(
-      this.player.worldX - PLAYER_W / 2,
-      this.player.worldY - PLAYER_FOOT_H,
-      PLAYER_W,
-      PLAYER_FOOT_H,
-    );
-    const trunk = this.treeTrunkRect(c, false);
+    const foot = footRect(this.player.worldX, this.player.worldY);
+    const trunk = treeTrunkRect(this.plot, c, false);
     if (!Phaser.Geom.Rectangle.Overlaps(foot, trunk)) return;
 
     const current = this.player.tileCoord;
     const safeX = GRID_OX + current.x * TILE + TILE / 2;
     const safeY = GRID_OY + current.y * TILE + TILE / 2;
     this.player.moveTo(safeX, safeY);
-  }
-
-  private treeTrunkRect(c: { x: number; y: number }, mature: boolean): Phaser.Geom.Rectangle {
-    const trunkW = mature ? 28 : 18;
-    const trunkH = mature ? 22 : 12;
-    return new Phaser.Geom.Rectangle(
-      GRID_OX + c.x * TILE + TILE / 2 - trunkW / 2,
-      GRID_OY + c.y * TILE + TILE - trunkH,
-      trunkW,
-      trunkH,
-    );
   }
 
   private doSleep(): void {
