@@ -21,6 +21,7 @@ import {
 } from '../ui';
 import { DISPLAY_MODE_LABEL, RESOLUTIONS, applyDisplaySettings, resolutionOption } from '../display';
 import * as audio from '../audio';
+import { DEPTH } from '../depths';
 
 interface OptionsData {
   /** Cena que abriu as opções; é pausada enquanto o modal está aberto. */
@@ -85,7 +86,7 @@ export class OptionsScene extends Phaser.Scene {
     const cx = this.scale.width / 2;
     const cy = this.scale.height / 2;
     const panel = new Panel(this, { width: 740, height: 560, title: 'Opções' });
-    panel.setDepth(3000);
+    panel.setDepth(DEPTH.modal);
 
     const focusItems: FocusItem[] = [];
     const tabFocusItems: Array<{ key: Tab; item: FocusItem }> = [];
@@ -102,7 +103,7 @@ export class OptionsScene extends Phaser.Scene {
         fontSize: UI.size.body,
         variant: tab.key === this.activeTab ? 'primary' : 'default',
         onClick: () => this.setTab(tab.key),
-      }).setDepth(3001);
+      }).setDepth(DEPTH.modalContent);
       tabFocusItems.push({ key: tab.key, item: {
         label: `Aba ${tab.label}`,
         onFocus: (v) => button.setFocused(v),
@@ -112,7 +113,7 @@ export class OptionsScene extends Phaser.Scene {
       } });
     }
 
-    this.content = this.add.container(cx, cy + 8).setDepth(3001);
+    this.content = this.add.container(cx, cy + 8).setDepth(DEPTH.modalContent);
     const activeTabItem = tabFocusItems.find((tab) => tab.key === this.activeTab)?.item;
     if (activeTabItem) focusItems.push(activeTabItem);
     focusItems.push(...this.renderTab());
@@ -122,7 +123,7 @@ export class OptionsScene extends Phaser.Scene {
       x: cx, y: cy + 235, width: 200, height: 44,
       label: 'Voltar [ESC]', variant: 'primary',
       onClick: () => this.close(),
-    }).setDepth(3001);
+    }).setDepth(DEPTH.modalContent);
     focusItems.push({
       label: 'Voltar',
       onFocus: (v) => back.setFocused(v),

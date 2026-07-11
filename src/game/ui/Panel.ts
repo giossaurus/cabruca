@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { DEPTH } from '../depths';
 import { UI } from './theme';
 
 export interface PanelConfig {
@@ -49,7 +50,7 @@ export class Panel extends Phaser.GameObjects.Container {
       this.add(title);
     }
 
-    this.setDepth(3000);
+    this.setDepth(DEPTH.modal);
     scene.add.existing(this);
   }
 

@@ -28,9 +28,9 @@ export const UI = {
     warn: 0xf28c74,
     harvest: 0xf6c76d,
     // Indicadores
-    biodiversidade: 0x8fcf87,
-    economia: 0xf1c97a,
-    comunidade: 0x8dbbd3,
+    biodiversidade: 0x4e9e57,
+    economia: 0xf2c14e,
+    comunidade: 0x4e8fd0,
   },
 
   /** Cores de texto (strings CSS para Phaser.Text). */

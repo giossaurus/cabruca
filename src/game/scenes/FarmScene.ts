@@ -8,6 +8,7 @@ import { GRID_DEBUG } from '../debug';
 import { applyAccessibilitySettings, announce } from '../accessibility';
 import { UI, StatBar, Panel, Button, FocusList, exemplaryFarmer, keyLabel, loadProfile, loadSettings, masterTitle, normalizeKeyCode, phaserKeyName, prosperousTitle, type Settings } from '../ui';
 import { clearSave, loadFarm, writeSave } from '../save';
+import { DEPTH } from '../depths';
 import * as audio from '../audio';
 
 /** Intervalo do autosave periódico (rede de segurança além do save ao dormir). */
@@ -40,13 +41,6 @@ const SLOT_COUNT = 6;
 const SLOT_BAR_W = SLOT_COUNT * SLOT_SIZE + (SLOT_COUNT - 1) * SLOT_GAP + SLOT_PAD * 2;
 const SLOT_BAR_H = SLOT_SIZE + SLOT_PAD * 2;
 
-// Faixas de profundidade. O fog cobre TODO o mundo (acima de plantas/jogador,
-// cujo depth vai até ~WORLD_H); a UI fica acima do fog; overlays acima de tudo.
-const DEPTH_FOG = 1400;
-const DEPTH_HUD = 1500;
-const DEPTH_SLOTBAR = 1450;
-const DEPTH_HELP = 1600;
-const DEPTH_TRANSITION = 5000;
 /** Diâmetro do "pincel" que apaga a névoa ao redor do jogador (raio ~150px). */
 const FOG_BRUSH = 300;
 const PLAYER_FOOT_H = 14;
@@ -77,9 +71,9 @@ interface SlotUI {
 }
 
 const INDICATOR_META: ReadonlyArray<{ key: IndicatorKey; label: string; color: number }> = [
-  { key: 'biodiversidade', label: 'Biodiversidade', color: 0x4e9e57 },
-  { key: 'economia', label: 'Economia', color: 0xf2c14e },
-  { key: 'comunidade', label: 'Comunidade', color: 0x4e8fd0 },
+  { key: 'biodiversidade', label: 'Biodiversidade', color: UI.color.biodiversidade },
+  { key: 'economia', label: 'Economia', color: UI.color.economia },
+  { key: 'comunidade', label: 'Comunidade', color: UI.color.comunidade },
 ];
 
 interface MoveKeys {
@@ -306,7 +300,7 @@ export class FarmScene extends Phaser.Scene {
       if (key !== TextureKey.DecorFlower && this.obstacles.some((o) => Phaser.Geom.Rectangle.Overlaps(hit, o))) continue;
       // Flores são rasteiras (depth baixo fixo, sob o jogador); arbustos e pedras
       // são volumes e ordenam por Y com o jogador (base em y por causa do origin 1).
-      const depth = key === TextureKey.DecorFlower ? -15 : Math.min(Math.round(y), DEPTH_FOG - 10);
+      const depth = key === TextureKey.DecorFlower ? -15 : Math.min(Math.round(y), DEPTH.fog - 10);
       this.add.image(x, y, key).setOrigin(0.5, 1).setScale(scale).setDepth(depth);
       if (key !== TextureKey.DecorFlower) this.obstacles.push(hit);
     }
@@ -350,8 +344,8 @@ export class FarmScene extends Phaser.Scene {
         this.add.image(x, y, key).setOrigin(0.5, 0.5).setScale(s).setDepth(-18).setAlpha(0.92);
       } else {
         if (blocked(new Phaser.Geom.Rectangle(x - w / 2, y - targetH, w, targetH))) return;
-        // Ordena com o jogador, mas sempre sob o fog (DEPTH_FOG = 1400).
-        this.add.image(x, y, key).setOrigin(0.5, 1).setScale(s).setDepth(Math.min(Math.round(y), DEPTH_FOG - 10));
+        // Ordena com o jogador, mas sempre sob o fog (DEPTH.fog = 1400).
+        this.add.image(x, y, key).setOrigin(0.5, 1).setScale(s).setDepth(Math.min(Math.round(y), DEPTH.fog - 10));
       }
     };
 
@@ -423,7 +417,7 @@ export class FarmScene extends Phaser.Scene {
   /** Névoa cobrindo o mundo; o explorado é apagado (permanente). */
   private buildFog(): void {
     this.makeFogBrush();
-    this.fog = this.add.renderTexture(0, 0, WORLD_W, WORLD_H).setOrigin(0, 0).setDepth(DEPTH_FOG);
+    this.fog = this.add.renderTexture(0, 0, WORLD_W, WORLD_H).setOrigin(0, 0).setDepth(DEPTH.fog);
     this.fog.fill(0x0b130e, 1);
     // Revela o talhão + arredores de início (senão o jogador nasce "no escuro").
     const cx = GRID_OX + (this.farm.grid.width * TILE) / 2;
@@ -543,7 +537,7 @@ export class FarmScene extends Phaser.Scene {
     const h = this.scale.height;
     const overlay = this.add.container(0, 0)
       .setScrollFactor(0)
-      .setDepth(DEPTH_TRANSITION);
+      .setDepth(DEPTH.transition);
     const background = this.add.image(w / 2, h / 2, TextureKey.SleepBackgroundStarry);
     const scale = Math.max(w / background.width, h / background.height) * 1.03;
     background.setScale(scale);
@@ -593,7 +587,7 @@ export class FarmScene extends Phaser.Scene {
    * painel lateral). Uma linha: dia · energia · três indicadores compactos.
    */
   private buildHud(): void {
-    const hud = this.add.container(0, 0).setDepth(1500).setScrollFactor(0);
+    const hud = this.add.container(0, 0).setDepth(DEPTH.hud).setScrollFactor(0);
     this.hudLayer = hud;
     hud.add(this.add.rectangle(0, 0, this.scale.width, 38, UI.color.overlay, 0.62).setOrigin(0, 0));
 
@@ -622,7 +616,7 @@ export class FarmScene extends Phaser.Scene {
       x: this.scale.width - 26, y: 19, width: 30, height: 26,
       label: '?', fontSize: UI.size.body,
       onClick: () => this.toggleHelp(),
-    }).setDepth(DEPTH_HELP).setScrollFactor(0);
+    }).setDepth(DEPTH.help).setScrollFactor(0);
   }
 
   private buildInteractionText(): void {
@@ -630,13 +624,13 @@ export class FarmScene extends Phaser.Scene {
     this.interactionHint = this.add.text(this.scale.width / 2, y, '', {
       fontFamily: UI.font, fontSize: UI.size.small, color: UI.text.primary,
       backgroundColor: '#05100a',
-    }).setOrigin(0.5).setPadding(8, 4, 8, 4).setScrollFactor(0).setDepth(DEPTH_HELP).setVisible(false);
+    }).setOrigin(0.5).setPadding(8, 4, 8, 4).setScrollFactor(0).setDepth(DEPTH.help).setVisible(false);
     this.toastText = this.add.text(this.scale.width / 2, y - 34, '', {
       fontFamily: UI.font, fontSize: UI.size.small, color: UI.text.soft,
       backgroundColor: '#05100a',
       wordWrap: { width: Math.min(520, this.scale.width - 48) },
       align: 'center',
-    }).setOrigin(0.5).setPadding(8, 4, 8, 4).setScrollFactor(0).setDepth(DEPTH_HELP).setAlpha(0);
+    }).setOrigin(0.5).setPadding(8, 4, 8, 4).setScrollFactor(0).setDepth(DEPTH.help).setAlpha(0);
   }
 
   /** Páginas do tutorial "Como jogar" (título + corpo), navegadas com setas. */
@@ -748,7 +742,7 @@ export class FarmScene extends Phaser.Scene {
     const barY = this.scale.height - barH - 10; // fixa no rodapé da VIEWPORT
 
     // Container fixo à câmera (a câmera segue o jogador) e acima da névoa.
-    const layer = this.add.container(0, 0).setScrollFactor(0).setDepth(DEPTH_SLOTBAR);
+    const layer = this.add.container(0, 0).setScrollFactor(0).setDepth(DEPTH.slotbar);
     this.slotBarLayer = layer;
     this.slotBarBounds = new Phaser.Geom.Rectangle(barX, barY, barW, barH);
     layer.add(this.add.rectangle(barX, barY, barW, barH, 0x2a1a10).setOrigin(0, 0));
@@ -1163,7 +1157,7 @@ export class FarmScene extends Phaser.Scene {
       const px = GRID_OX + t.x * TILE;
       const py = GRID_OY + t.y * TILE;
       // Ordenação por Y da base (ancorada em py + TILE) com o jogador, sob o fog.
-      const baseDepth = Math.min(Math.round(py + TILE), DEPTH_FOG - 10);
+      const baseDepth = Math.min(Math.round(py + TILE), DEPTH.fog - 10);
 
       // Visualização da grade de sombra (tint ideal / mata fechada): só QA.
       if (GRID_DEBUG && t.kind !== 'tree') {
@@ -1266,7 +1260,7 @@ export class FarmScene extends Phaser.Scene {
       fontFamily: 'monospace', fontSize: '20px', color: '#0d1f13', backgroundColor: '#7bd06a',
     }).setOrigin(0.5).setPadding(8).setInteractive({ useHandCursor: true });
     btn.on('pointerdown', () => this.restart());
-    this.endOverlay = this.add.container(0, 0, [bg, title, sub, statsText, btn]).setDepth(2000).setScrollFactor(0);
+    this.endOverlay = this.add.container(0, 0, [bg, title, sub, statsText, btn]).setDepth(DEPTH.end).setScrollFactor(0);
     announce(this.settings, `${titleText}. ${subText}. Pressione R para reiniciar.`);
   }
 

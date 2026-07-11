@@ -15,6 +15,7 @@ import {
 } from '../ui';
 import { drawMenuBackground } from './menuBackground';
 import * as audio from '../audio';
+import { DEPTH } from '../depths';
 
 const PRONOUNS: ReadonlyArray<{ id: Pronoun; label: string }> = [
   { id: 'ele', label: 'Ele' },
@@ -172,7 +173,7 @@ export class IntroScene extends Phaser.Scene {
   private showLetter(nickname: string, pronoun: Pronoun): void {
     const cx = this.scale.width / 2;
     const cy = this.scale.height / 2;
-    const layer = this.add.container(0, 0).setDepth(3000);
+    const layer = this.add.container(0, 0).setDepth(DEPTH.modal);
 
     const overlay = this.add
       .rectangle(cx, cy, this.scale.width, this.scale.height, UI.color.overlay, 0.8)
