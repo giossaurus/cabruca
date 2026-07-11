@@ -6,7 +6,8 @@ import { Dog } from '../Dog';
 import { FOREST_FLAT_KEYS, FOREST_PROP_KEYS } from '../forest';
 import { GRID_DEBUG } from '../debug';
 import { applyAccessibilitySettings, announce } from '../accessibility';
-import { UI, StatBar, Panel, Button, FocusList, exemplaryFarmer, keyLabel, loadProfile, loadSettings, masterTitle, normalizeKeyCode, phaserKeyName, prosperousTitle, type Settings } from '../ui';
+import { UI, Panel, Button, FocusList, exemplaryFarmer, keyLabel, loadProfile, loadSettings, masterTitle, normalizeKeyCode, phaserKeyName, prosperousTitle, type ActionId, type Settings } from '../ui';
+import { PAD, activeDevice, activePadKind, buttonGlyph, noteGamepadUse, promptLabel, readPadDir } from '../gamepad';
 import { clearSave, loadFarm, writeSave } from '../save';
 import { DEPTH } from '../depths';
 import {
@@ -15,6 +16,7 @@ import {
 } from '../world/geometry';
 import { FogOfWar, buildFarmWorld } from '../world/buildFarmWorld';
 import { Hotbar, type Tool } from '../farm/Hotbar';
+import { FarmHud, INDICATOR_META } from '../farm/FarmHud';
 import * as audio from '../audio';
 
 /** Intervalo do autosave periódico (rede de segurança além do save ao dormir). */
@@ -31,12 +33,6 @@ const AUTOSAVE_MS = 60_000;
  * faixa integrada no topo, sobre o mundo; o cacau colhido aparece como contador
  * no próprio slot Cacau da hotbar.
  */
-
-const INDICATOR_META: ReadonlyArray<{ key: IndicatorKey; label: string; color: number }> = [
-  { key: 'biodiversidade', label: 'Biodiversidade', color: UI.color.biodiversidade },
-  { key: 'economia', label: 'Economia', color: UI.color.economia },
-  { key: 'comunidade', label: 'Comunidade', color: UI.color.comunidade },
-];
 
 interface MoveKeys {
   up: Phaser.Input.Keyboard.Key;
@@ -68,10 +64,7 @@ export class FarmScene extends Phaser.Scene {
   private saleZone!: Phaser.Geom.Rectangle;
   private transitioning = false;
 
-  private dayText!: Phaser.GameObjects.Text;
-  private energyBar!: StatBar;
-  private indicatorBars!: Map<IndicatorKey, StatBar>;
-  private hudLayer!: Phaser.GameObjects.Container;
+  private hud!: FarmHud;
   private hotbar!: Hotbar;
   private endOverlay: Phaser.GameObjects.Container | undefined;
   private helpOverlay: Phaser.GameObjects.Container | undefined;
@@ -79,8 +72,6 @@ export class FarmScene extends Phaser.Scene {
   private renderHelpStep: (() => void) | undefined;
   private saleOverlay: Phaser.GameObjects.Container | undefined;
   private saleFocus: FocusList | undefined;
-  private interactionHint!: Phaser.GameObjects.Text;
-  private toastText!: Phaser.GameObjects.Text;
 
   constructor() {
     super('FarmScene');
@@ -94,7 +85,6 @@ export class FarmScene extends Phaser.Scene {
     this.settings = loadSettings();
     applyAccessibilitySettings(this.settings);
     this.tool = 'tree';
-    this.indicatorBars = new Map();
     this.endOverlay = undefined;
     this.helpOverlay = undefined;
     this.helpStep = 0;
@@ -138,9 +128,11 @@ export class FarmScene extends Phaser.Scene {
 
     this.fog = new FogOfWar(this);
     this.fog.revealPlotStart(this.plot);
-    this.buildHud();
-    this.buildHelpButton();
-    this.buildInteractionText();
+    this.hud = new FarmHud(this, {
+      getSettings: () => this.settings,
+      hintY: this.scale.height - Hotbar.BAR_H - 22,
+      onHelp: () => this.toggleHelp(),
+    });
     this.hotbar = new Hotbar(this, {
       isUiLocked: () => Boolean(this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning),
       onToolSelected: (t) => this.setTool(t),
@@ -182,8 +174,7 @@ export class FarmScene extends Phaser.Scene {
     const b = this.player.sprite.getBounds();
     // Bounds do jogador em coordenadas de TELA (sem zoom/rotação na câmera).
     const screen = new Phaser.Geom.Rectangle(b.x - cam.scrollX, b.y - cam.scrollY, b.width, b.height);
-    const hudRect = new Phaser.Geom.Rectangle(0, 0, this.scale.width, 38);
-    this.hudLayer.setAlpha(Phaser.Geom.Rectangle.Overlaps(screen, hudRect) ? 0.5 : 1);
+    this.hud.setTopAlpha(Phaser.Geom.Rectangle.Overlaps(screen, this.hud.topBarRect) ? 0.5 : 1);
     this.hotbar.setAlpha(Phaser.Geom.Rectangle.Overlaps(screen, this.hotbar.bounds) ? 0.5 : 1);
   }
 
@@ -202,8 +193,7 @@ export class FarmScene extends Phaser.Scene {
     if (this.nearDoor()) text = 'E / Espaço: dormir na casa';
     else if (this.nearMarket()) text = 'E / V: abrir vendas';
     else if (this.player.onPlot) text = this.tileActionHint();
-    this.interactionHint.setText(text);
-    this.interactionHint.setVisible(text.length > 0 && this.toastText.alpha <= 0.01);
+    this.hud.setHint(text);
   }
 
   private tileActionHint(): string {
@@ -316,57 +306,6 @@ export class FarmScene extends Phaser.Scene {
         },
       });
     });
-  }
-
-  /**
-   * Status bar INTEGRADA: faixa translúcida no topo, sobre o mundo (não é um
-   * painel lateral). Uma linha: dia · energia · três indicadores compactos.
-   */
-  private buildHud(): void {
-    const hud = this.add.container(0, 0).setDepth(DEPTH.hud).setScrollFactor(0);
-    this.hudLayer = hud;
-    hud.add(this.add.rectangle(0, 0, this.scale.width, 38, UI.color.overlay, 0.62).setOrigin(0, 0));
-
-    this.dayText = this.add
-      .text(14, 19, '', { fontFamily: UI.font, fontSize: UI.size.body, color: UI.text.primary })
-      .setOrigin(0, 0.5);
-    hud.add(this.dayText);
-
-    this.energyBar = new StatBar(this, { x: 132, y: 13, width: 96, height: 12, color: UI.color.energy, caption: 'Energia' });
-    hud.add(this.energyBar);
-
-    const short: Record<IndicatorKey, string> = { biodiversidade: 'Bio', economia: 'Eco', comunidade: 'Com' };
-    let x = 330;
-    for (const meta of INDICATOR_META) {
-      const bar = new StatBar(this, { x, y: 13, width: 72, height: 12, color: meta.color, caption: short[meta.key] });
-      hud.add(bar);
-      this.indicatorBars.set(meta.key, bar);
-      x += 128;
-    }
-  }
-
-  /** Botão compacto "?" no topo-direita que abre a ajuda como modal sob demanda
-   * (em vez de um bloco de texto fixo ocupando a tela). */
-  private buildHelpButton(): void {
-    new Button(this, {
-      x: this.scale.width - 26, y: 19, width: 30, height: 26,
-      label: '?', fontSize: UI.size.body,
-      onClick: () => this.toggleHelp(),
-    }).setDepth(DEPTH.help).setScrollFactor(0);
-  }
-
-  private buildInteractionText(): void {
-    const y = this.scale.height - Hotbar.BAR_H - 22;
-    this.interactionHint = this.add.text(this.scale.width / 2, y, '', {
-      fontFamily: UI.font, fontSize: UI.size.small, color: UI.text.primary,
-      backgroundColor: '#05100a',
-    }).setOrigin(0.5).setPadding(8, 4, 8, 4).setScrollFactor(0).setDepth(DEPTH.help).setVisible(false);
-    this.toastText = this.add.text(this.scale.width / 2, y - 34, '', {
-      fontFamily: UI.font, fontSize: UI.size.small, color: UI.text.soft,
-      backgroundColor: '#05100a',
-      wordWrap: { width: Math.min(520, this.scale.width - 48) },
-      align: 'center',
-    }).setOrigin(0.5).setPadding(8, 4, 8, 4).setScrollFactor(0).setDepth(DEPTH.help).setAlpha(0);
   }
 
   /** Páginas do tutorial "Como jogar" (título + corpo), navegadas com setas. */
@@ -572,11 +511,11 @@ export class FarmScene extends Phaser.Scene {
     if (!this.player.onPlot) return; // fora do talhão não há tile p/ agir
     const c = this.tool === 'tree' ? this.treeTargetCoord() : this.player.tileCoord;
     if (!c) {
-      this.showToast('Olhe para um tile do talhão para plantar nativa.');
+      this.hud.showToast('Olhe para um tile do talhão para plantar nativa.');
       return;
     }
     if (this.tool === 'tree' && this.sameCoord(c, this.player.tileCoord)) {
-      this.showToast('Saia desse tile ou olhe para um tile vizinho para plantar a nativa.');
+      this.hud.showToast('Saia desse tile ou olhe para um tile vizinho para plantar a nativa.');
       return;
     }
     const before = this.tileViewAt(c);
@@ -603,14 +542,14 @@ export class FarmScene extends Phaser.Scene {
     if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
     const c = this.findReplantCandidate();
     if (!c) {
-      this.showToast('Nenhuma nativa recém-plantada por perto para replantar.');
+      this.hud.showToast('Nenhuma nativa recém-plantada por perto para replantar.');
       return;
     }
     if (this.farm.replantTree(c)) {
       this.redraw();
-      this.showToast('Nativa replantada/desfeita. Energia -2.');
+      this.hud.showToast('Nativa replantada/desfeita. Energia -2.');
     } else {
-      this.showToast('Replantar custa 2 de energia e só vale para nativa jovem.');
+      this.hud.showToast('Replantar custa 2 de energia e só vale para nativa jovem.');
     }
   }
 
@@ -628,7 +567,7 @@ export class FarmScene extends Phaser.Scene {
   private doSleep(): void {
     if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
     if (!this.nearDoor()) {
-      this.showToast('Vá até a porta da casa para dormir.');
+      this.hud.showToast('Vá até a porta da casa para dormir.');
       return;
     }
     this.enterHouse();
@@ -637,7 +576,7 @@ export class FarmScene extends Phaser.Scene {
   private doSell(): void {
     if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
     if (!this.nearMarket()) {
-      this.showToast('Vá até a banca para vender cacau.');
+      this.hud.showToast('Vá até a banca para vender cacau.');
       return;
     }
     this.toggleSales();
@@ -739,7 +678,7 @@ export class FarmScene extends Phaser.Scene {
         this.closeSales();
         this.time.delayedCall(0, () => {
           this.redraw();
-          this.showToast(sold > 0 ? `Vendido: ${sold} cacau. Ciclo completo!` : 'Sem cacau para vender.');
+          this.hud.showToast(sold > 0 ? `Vendido: ${sold} cacau. Ciclo completo!` : 'Sem cacau para vender.');
         });
       },
     }).setEnabled(qty > 0);
@@ -830,13 +769,8 @@ export class FarmScene extends Phaser.Scene {
       }
     }
 
-    this.dayText.setText(`Dia ${Math.min(s.day, s.totalDays)} / ${s.totalDays}`);
+    this.hud.updateStats(s);
     this.hotbar.setCacaoCount(this.farm.inventory.count(ITEM_CACAU_FRESCO));
-    this.energyBar.set(s.energy / s.maxEnergy, `${s.energy}/${s.maxEnergy}`);
-    for (const meta of INDICATOR_META) {
-      const v = s.indicators[meta.key];
-      this.indicatorBars.get(meta.key)!.set(v / 100, String(Math.round(v)));
-    }
 
     if (s.phase !== 'jogando') this.showEnd(s.phase, s.indicators);
   }
@@ -899,51 +833,37 @@ export class FarmScene extends Phaser.Scene {
     if (ok) {
       switch (this.tool) {
         case 'tree':
-          this.showToast('Nativa plantada. Ela amadurece com os dias.');
+          this.hud.showToast('Nativa plantada. Ela amadurece com os dias.');
           return;
         case 'cacao':
-          this.showToast('Cacau plantado. Durma alguns dias e volte para colher.');
+          this.hud.showToast('Cacau plantado. Durma alguns dias e volte para colher.');
           return;
         case 'harvest':
-          this.showToast(`Cacau colhido: x${this.farm.inventory.count(ITEM_CACAU_FRESCO)}.`);
+          this.hud.showToast(`Cacau colhido: x${this.farm.inventory.count(ITEM_CACAU_FRESCO)}.`);
           return;
         case 'prune':
-          this.showToast('Nativa podada: menos sombra, mais produtividade ao redor.');
+          this.hud.showToast('Nativa podada: menos sombra, mais produtividade ao redor.');
           return;
       }
     }
 
     if (this.farm.energy <= 0) {
-      this.showToast('Sem energia. Va dormir na casa.');
+      this.hud.showToast('Sem energia. Va dormir na casa.');
       return;
     }
     if (!before) return;
     if ((this.tool === 'tree' || this.tool === 'cacao') && before.kind !== 'empty') {
-      this.showToast('Esse tile ja esta ocupado.');
+      this.hud.showToast('Esse tile ja esta ocupado.');
       return;
     }
     if (this.tool === 'harvest') {
-      if (before.cacao?.dead) this.showToast('Esse cacau morreu. Plante outro sob sombra ideal.');
-      else if (before.cacao) this.showToast('Esse cacau ainda nao esta maduro. Durma mais um dia.');
-      else this.showToast('Nao ha cacau para colher aqui.');
+      if (before.cacao?.dead) this.hud.showToast('Esse cacau morreu. Plante outro sob sombra ideal.');
+      else if (before.cacao) this.hud.showToast('Esse cacau ainda nao esta maduro. Durma mais um dia.');
+      else this.hud.showToast('Nao ha cacau para colher aqui.');
       return;
     }
     if (this.tool === 'prune') {
-      this.showToast('So nativas maduras podem ser podadas.');
+      this.hud.showToast('So nativas maduras podem ser podadas.');
     }
-  }
-
-  private showToast(message: string): void {
-    announce(this.settings, message);
-    this.interactionHint.setVisible(false);
-    this.toastText.setText(message).setAlpha(1);
-    this.tweens.killTweensOf(this.toastText);
-    this.tweens.add({
-      targets: this.toastText,
-      alpha: 0,
-      duration: 350,
-      delay: 1500,
-      onComplete: () => this.updateInteractionText(),
-    });
   }
 }
