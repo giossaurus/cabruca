@@ -53,7 +53,6 @@ const REMAP_ACTIONS: readonly ActionId[] = [
   'moveLeft',
   'moveRight',
   'interact',
-  'inventory',
   'sleep',
   'sell',
   'replant',

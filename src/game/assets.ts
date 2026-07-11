@@ -31,6 +31,8 @@ export const TextureKey = {
   // Jogador (spritesheets direcionais do pack).
   PlayerIdle: 'player_idle',
   PlayerWalk: 'player_walk',
+  // Cão de estimação (sheet direcional do pack Goldie).
+  Dog: 'dog',
   // UI.
   MenuBackground: 'menu_background',
   MenuBackgroundSparseExtraLight: 'menu_background_sparse_extra_light',
@@ -66,6 +68,23 @@ export const playerAnim = (kind: 'idle' | 'walk', facing: PlayerFacing): string 
 /** Footprint de COLISÃO do jogador em pixels (independente do tamanho do sprite). */
 export const PLAYER_W = 36;
 export const PLAYER_H = 48;
+
+// ─── Cão de estimação (pack Goldie, por Artoellie — `dogs/goldie.png`) ────────
+// Sheet 32×40, 4 COLUNAS × 8 LINHAS. Linhas úteis para o pet:
+//   4 = andar p/ baixo (de frente), 5 = andar p/ cima (de costas),
+//   6 = andar de lado (virado p/ DIREITA no sheet → flipX quando anda p/ esquerda).
+//   idle (sentado): 0 = de frente, 2 = de costas, 8 = de lado (virado p/ direita).
+export const DOG_FRAME_W = 32;
+export const DOG_FRAME_H = 40;
+export const DOG_COLS = 4;
+
+export type DogFacing = 'down' | 'up' | 'side';
+/** Linha do ciclo de caminhada por direção. */
+export const DogWalkRow: Record<DogFacing, number> = { down: 4, up: 5, side: 6 };
+/** Frame estático de descanso (sentado) por direção — mesma orientação do walk. */
+export const DogIdleFrame: Record<DogFacing, number> = { down: 0, up: 2, side: 8 };
+/** Nome da animação de caminhada do cão (ex.: `dog_walk_side`). */
+export const dogAnim = (facing: DogFacing): string => `dog_walk_${facing}`;
 
 /** Mapeia o estágio (domínio) para a key da textura correspondente. */
 export function cacaoTextureKey(stage: CacaoStage, dead: boolean): string {

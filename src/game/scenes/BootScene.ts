@@ -3,8 +3,10 @@ import {
   createPlaceholderTextures, TextureKey,
   PLAYER_FRAME_W, PLAYER_FRAME_H, PLAYER_IDLE_COLS, PLAYER_WALK_COLS,
   PlayerRow, playerAnim, type PlayerFacing,
+  DOG_FRAME_W, DOG_FRAME_H, DOG_COLS, DogWalkRow, dogAnim, type DogFacing,
 } from '../assets';
 import { applyDisplaySettings } from '../display';
+import { FOREST_ASSETS } from '../forest';
 import { loadSettings } from '../ui';
 // Assets do pack Farm Life (recortados) em src/assets/farm-life/ — o Vite
 // resolve cada import para uma URL servível.
@@ -18,6 +20,7 @@ import stoneUrl from '../../assets/farm-life/decor/stone.png';
 import houseUrl from '../../assets/farm-life/buildings/house.png';
 import idleUrl from '../../assets/farm-life/character/idle.png';
 import walkUrl from '../../assets/farm-life/character/walk.png';
+import dogUrl from '../../assets/dogs/goldie.png';
 import menuBackgroundUrl from '../../../Day-Sparse-Clouds-BG-Light-Green-FG.png';
 import menuBackgroundSparseExtraLightUrl from '../../../Day-Sparse-Clouds-BG-Extra-Light-Green-FG.png';
 import menuBackgroundLargeLightUrl from '../../../Day-Large-Clouds-BG-Light-Green-FG.png';
@@ -58,12 +61,15 @@ export class BootScene extends Phaser.Scene {
     const frame = { frameWidth: PLAYER_FRAME_W, frameHeight: PLAYER_FRAME_H };
     this.load.spritesheet(TextureKey.PlayerIdle, idleUrl, frame);
     this.load.spritesheet(TextureKey.PlayerWalk, walkUrl, frame);
+    this.load.spritesheet(TextureKey.Dog, dogUrl, { frameWidth: DOG_FRAME_W, frameHeight: DOG_FRAME_H });
     this.load.image(TextureKey.MenuBackground, menuBackgroundUrl);
     this.load.image(TextureKey.MenuBackgroundSparseExtraLight, menuBackgroundSparseExtraLightUrl);
     this.load.image(TextureKey.MenuBackgroundLargeLight, menuBackgroundLargeLightUrl);
     this.load.image(TextureKey.MenuBackgroundLargeExtraLight, menuBackgroundLargeExtraLightUrl);
     this.load.image(TextureKey.SleepBackgroundStarry, sleepBackgroundStarryUrl);
     this.load.image(TextureKey.ScienzaLogo, scienzaLogoUrl);
+    // Detalhes de chão de floresta (Pocket Cozy Pixels) — ambientação espalhada.
+    for (const asset of FOREST_ASSETS) this.load.image(asset.key, asset.url);
     // Trilhas: array de fontes (Phaser escolhe o formato suportado). Em HTML5 o
     // loader completa por streaming, sem baixar os ~50 MB da música antes do jogo.
     this.load.audio(AudioKey.Music, [musicOggUrl, musicMp3Url]);
@@ -74,6 +80,7 @@ export class BootScene extends Phaser.Scene {
     applyDisplaySettings(this.game, loadSettings());
     createPlaceholderTextures(this);
     this.createPlayerAnims();
+    this.createDogAnims();
     void this.startAfterFontsReady();
   }
 
@@ -112,6 +119,20 @@ export class BootScene extends Phaser.Scene {
           start: walkStart, end: walkStart + PLAYER_WALK_COLS - 1,
         }),
         frameRate: 12,
+        repeat: -1,
+      });
+    }
+  }
+
+  /** Ciclos de caminhada do cão (baixo/cima/lado) — ver DogWalkRow em assets.ts. */
+  private createDogAnims(): void {
+    const dirs: DogFacing[] = ['down', 'up', 'side'];
+    for (const facing of dirs) {
+      const start = DogWalkRow[facing] * DOG_COLS;
+      this.anims.create({
+        key: dogAnim(facing),
+        frames: this.anims.generateFrameNumbers(TextureKey.Dog, { start, end: start + DOG_COLS - 1 }),
+        frameRate: 8,
         repeat: -1,
       });
     }

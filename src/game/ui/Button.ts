@@ -62,6 +62,20 @@ export class Button extends Phaser.GameObjects.Container {
     scene.add.existing(this);
   }
 
+  /**
+   * Propaga o scrollFactor aos filhos (retângulo/rótulo). O hit-test do Phaser 4
+   * usa o scrollFactor do PRÓPRIO objeto interativo (o `bg`), não o do container
+   * (e `Container.setScrollFactor` não repassa aos filhos). Sem isto, um botão
+   * fixo à câmera (`setScrollFactor(0)`) sobre um mundo que rola fica inclicável
+   * conforme a câmera se afasta da origem.
+   */
+  override setScrollFactor(x: number, y: number = x): this {
+    super.setScrollFactor(x, y);
+    this.bg.setScrollFactor(x, y);
+    this.label.setScrollFactor(x, y);
+    return this;
+  }
+
   setEnabled(enabled: boolean): this {
     this._enabled = enabled;
     if (enabled) this.bg.setInteractive({ useHandCursor: true });

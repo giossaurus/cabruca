@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import { Farm, ITEM_CACAU_FRESCO, type IndicatorKey } from '../../domain';
 import { PLAYER_W, TILE, TextureKey, cacaoTextureKey } from '../assets';
 import { Player } from '../Player';
+import { Dog } from '../Dog';
+import { FOREST_FLAT_KEYS, FOREST_PROP_KEYS } from '../forest';
 import { GRID_DEBUG } from '../debug';
 import { applyAccessibilitySettings, announce } from '../accessibility';
 import { UI, StatBar, Panel, Button, FocusList, keyLabel, loadSettings, normalizeKeyCode, phaserKeyName, type Settings } from '../ui';
@@ -15,7 +17,8 @@ import * as audio from '../audio';
  * Interação cozy: o jogador ANDA pela fazenda (WASD/setas) e age no tile onde
  * pisa (E/Espaço) ou interage com locais físicos (casa/banca). Ferramentas
  * ficam numa hotbar inferior; a status bar (dia, energia, indicadores) é uma
- * faixa integrada no topo, sobre o mundo; o inventário é um modal (tecla I).
+ * faixa integrada no topo, sobre o mundo; o cacau colhido aparece como contador
+ * no próprio slot Cacau da hotbar.
  */
 
 // Mundo maior que a tela (960×640): a câmera segue o jogador e o mapa vai sendo
@@ -43,11 +46,6 @@ const DEPTH_TRANSITION = 5000;
 /** Diâmetro do "pincel" que apaga a névoa ao redor do jogador (raio ~150px). */
 const FOG_BRUSH = 300;
 const PLAYER_FOOT_H = 14;
-
-/** Rótulos amigáveis de itens do inventário (itemId → texto exibido). */
-const ITEM_LABEL: Record<string, string> = {
-  [ITEM_CACAU_FRESCO]: 'Cacau',
-};
 
 /** A ajuda auto-abre uma vez por sessão (não a cada reinício). */
 let helpAutoShown = false;
@@ -95,6 +93,7 @@ export class FarmScene extends Phaser.Scene {
   private settings!: Settings;
   private tool: Tool = 'tree';
   private player!: Player;
+  private dog!: Dog;
   private moveKeys: MoveKeys[] = [];
   private mouseTarget: Phaser.Math.Vector2 | undefined;
 
@@ -112,8 +111,11 @@ export class FarmScene extends Phaser.Scene {
   private energyBar!: StatBar;
   private indicatorBars!: Map<IndicatorKey, StatBar>;
   private slots: SlotUI[] = [];
+  private hudLayer!: Phaser.GameObjects.Container;
+  private slotBarLayer!: Phaser.GameObjects.Container;
+  private slotBarBounds!: Phaser.Geom.Rectangle;
+  private cacauBadge!: Phaser.GameObjects.Text;
   private endOverlay: Phaser.GameObjects.Container | undefined;
-  private invOverlay: Phaser.GameObjects.Container | undefined;
   private helpOverlay: Phaser.GameObjects.Container | undefined;
   private saleOverlay: Phaser.GameObjects.Container | undefined;
   private saleFocus: FocusList | undefined;
@@ -132,7 +134,6 @@ export class FarmScene extends Phaser.Scene {
     this.indicatorBars = new Map();
     this.slots = [];
     this.endOverlay = undefined;
-    this.invOverlay = undefined;
     this.helpOverlay = undefined;
     this.saleOverlay = undefined;
     this.saleFocus?.destroy();
@@ -153,6 +154,7 @@ export class FarmScene extends Phaser.Scene {
     this.buildHouse();
     this.buildMarketStand();
     this.buildDecorations();
+    this.scatterForestDetails();
     this.shadeGfx = this.add.graphics().setDepth(-10);
     this.plantLayer = this.add.container(0, 0).setDepth(0);
     this.markerGfx = this.add.graphics().setDepth(1);
@@ -162,6 +164,8 @@ export class FarmScene extends Phaser.Scene {
     const world = { x: 0, y: 0, w: WORLD_W, h: WORLD_H };
     this.player = new Player(this, this.farm, plot, world, this.obstacles);
     this.cameras.main.startFollow(this.player.sprite, true, 0.12, 0.12);
+    // Cão de estimação: brinca pelo cenário e segue o dono (pura ambientação).
+    this.dog = new Dog(this, world, plot, this.player.worldX + 74, this.player.worldY + 34);
 
     this.buildFog();
     this.buildHud();
@@ -187,11 +191,29 @@ export class FarmScene extends Phaser.Scene {
 
   override update(_time: number, deltaMs: number): void {
     // Congela em overlays e durante a transição de dia (entrar na casa).
-    if (this.endOverlay || this.invOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
     this.player.update(deltaMs, this.readDir(), this.moveSpeedScale());
+    this.dog.update(deltaMs, this.player.worldX, this.player.worldY);
     this.revealFog();
     this.updateInteractionText();
     this.drawMarker();
+    this.fadeBarsUnderPlayer();
+  }
+
+  /**
+   * As barras de UI (topo e hotbar) ficam fixas à câmera com depth acima do
+   * jogador, então o escondem quando ele anda nas bordas da tela. Em vez de
+   * mudar a ordem de desenho, deixamos a barra sobreposta semitransparente para
+   * o personagem aparecer por baixo.
+   */
+  private fadeBarsUnderPlayer(): void {
+    const cam = this.cameras.main;
+    const b = this.player.sprite.getBounds();
+    // Bounds do jogador em coordenadas de TELA (sem zoom/rotação na câmera).
+    const screen = new Phaser.Geom.Rectangle(b.x - cam.scrollX, b.y - cam.scrollY, b.width, b.height);
+    const hudRect = new Phaser.Geom.Rectangle(0, 0, this.scale.width, 38);
+    this.hudLayer.setAlpha(Phaser.Geom.Rectangle.Overlaps(screen, hudRect) ? 0.5 : 1);
+    this.slotBarLayer.setAlpha(Phaser.Geom.Rectangle.Overlaps(screen, this.slotBarBounds) ? 0.5 : 1);
   }
 
   // ─── Setup estático ─────────────────────────────────────────────────────────
@@ -250,7 +272,6 @@ export class FarmScene extends Phaser.Scene {
       x > plotL - 40 && x < plotR + 40 && y > plotT - 40 && y < plotB + 40;
 
     const keys = [TextureKey.DecorBush, TextureKey.DecorStone, TextureKey.DecorFlower];
-    const layer = this.add.container(0, 0).setDepth(-15); // acima da grama, abaixo das plantas
     const reserved = [
       new Phaser.Geom.Rectangle(this.doorZone.x - 190, this.doorZone.y - 140, this.doorZone.width + 380, 330),
       new Phaser.Geom.Rectangle(this.saleZone.x - 130, this.saleZone.y - 120, this.saleZone.width + 260, 250),
@@ -269,9 +290,59 @@ export class FarmScene extends Phaser.Scene {
       const hit = new Phaser.Geom.Rectangle(x - hitW / 2, y - hitH, hitW, hitH);
       if (reserved.some((r) => Phaser.Geom.Rectangle.Overlaps(hit, r))) continue;
       if (key !== TextureKey.DecorFlower && this.obstacles.some((o) => Phaser.Geom.Rectangle.Overlaps(hit, o))) continue;
-      layer.add(this.add.image(x, y, key).setOrigin(0.5, 1).setScale(scale).setDepth(-15));
+      // Flores são rasteiras (depth baixo fixo, sob o jogador); arbustos e pedras
+      // são volumes e ordenam por Y com o jogador (base em y por causa do origin 1).
+      const depth = key === TextureKey.DecorFlower ? -15 : Math.min(Math.round(y), DEPTH_FOG - 10);
+      this.add.image(x, y, key).setOrigin(0.5, 1).setScale(scale).setDepth(depth);
       if (key !== TextureKey.DecorFlower) this.obstacles.push(hit);
     }
+  }
+
+  /**
+   * Detalhes de chão de floresta (Pocket Cozy Pixels) espalhados FORA do talhão:
+   * manchas deitadas (FLAT, sob a decoração) e volumes em pé (PROP, ordenados por
+   * Y com o jogador). Puramente cosmético, sem colisão. Semente própria para não
+   * repetir as posições do decor; determinístico entre sessões.
+   */
+  private scatterForestDetails(): void {
+    const plotL = GRID_OX;
+    const plotR = GRID_OX + this.farm.grid.width * TILE;
+    const plotT = GRID_OY;
+    const plotB = GRID_OY + this.farm.grid.height * TILE;
+    // Buffer maior que o decor: nada de detalhe encostando nos tiles de cacau.
+    const insidePlot = (x: number, y: number): boolean =>
+      x > plotL - 48 && x < plotR + 48 && y > plotT - 48 && y < plotB + 48;
+    const reserved = [
+      new Phaser.Geom.Rectangle(this.doorZone.x - 190, this.doorZone.y - 140, this.doorZone.width + 380, 330),
+      new Phaser.Geom.Rectangle(this.saleZone.x - 130, this.saleZone.y - 120, this.saleZone.width + 260, 250),
+    ];
+    const blocked = (r: Phaser.Geom.Rectangle): boolean =>
+      reserved.some((z) => Phaser.Geom.Rectangle.Overlaps(r, z));
+
+    let seed = 90210;
+    const rnd = (): number => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    const pick = (arr: readonly string[]): string => arr[Math.floor(rnd() * arr.length)]!;
+
+    const place = (key: string, flat: boolean): void => {
+      const x = 30 + rnd() * (WORLD_W - 60);
+      const y = 50 + rnd() * (WORLD_H - 80);
+      if (insidePlot(x, y)) return;
+      const src = this.textures.get(key).getSourceImage();
+      const targetH = flat ? 52 + rnd() * 28 : 40 + rnd() * 30;
+      const s = targetH / src.height;
+      const w = src.width * s;
+      if (flat) {
+        if (blocked(new Phaser.Geom.Rectangle(x - w / 2, y - targetH / 2, w, targetH))) return;
+        this.add.image(x, y, key).setOrigin(0.5, 0.5).setScale(s).setDepth(-18).setAlpha(0.92);
+      } else {
+        if (blocked(new Phaser.Geom.Rectangle(x - w / 2, y - targetH, w, targetH))) return;
+        // Ordena com o jogador, mas sempre sob o fog (DEPTH_FOG = 1400).
+        this.add.image(x, y, key).setOrigin(0.5, 1).setScale(s).setDepth(Math.min(Math.round(y), DEPTH_FOG - 10));
+      }
+    };
+
+    for (let i = 0; i < 30; i++) place(pick(FOREST_FLAT_KEYS), true);
+    for (let i = 0; i < 64; i++) place(pick(FOREST_PROP_KEYS), false);
   }
 
   /**
@@ -507,6 +578,7 @@ export class FarmScene extends Phaser.Scene {
    */
   private buildHud(): void {
     const hud = this.add.container(0, 0).setDepth(1500).setScrollFactor(0);
+    this.hudLayer = hud;
     hud.add(this.add.rectangle(0, 0, this.scale.width, 38, UI.color.overlay, 0.62).setOrigin(0, 0));
 
     this.dayText = this.add
@@ -553,7 +625,7 @@ export class FarmScene extends Phaser.Scene {
 
   /** Abre/fecha o modal de ajuda (controles + mecânicas). Congela o mundo. */
   private toggleHelp(): void {
-    if (this.endOverlay || this.saleOverlay || this.invOverlay) return;
+    if (this.endOverlay || this.saleOverlay) return;
     if (this.helpOverlay) {
       this.helpOverlay.destroy();
       this.helpOverlay = undefined;
@@ -574,7 +646,7 @@ export class FarmScene extends Phaser.Scene {
       `${keyLabel(keys.interact)} / Espaço: usar ferramenta, dormir na porta ou vender na banca\n` +
       '1-6: escolher item na hotbar\n' +
       `${keyLabel(keys.replant)}: replantar/undo de nativa recém-plantada (custa 2 energia)\n` +
-      `${keyLabel(keys.inventory)}: inventário   ${keyLabel(keys.pause)} / ESC: pausar/fechar\n` +
+      `${keyLabel(keys.pause)} / ESC: pausar/fechar\n` +
       'Mouse: clique no chão para andar; clique nos botões e slots\n\n' +
         'Casa: fica ao norte e passa o dia.\n' +
         'Banca: abre o menu de venda de cacau.\n' +
@@ -607,6 +679,8 @@ export class FarmScene extends Phaser.Scene {
 
     // Container fixo à câmera (a câmera segue o jogador) e acima da névoa.
     const layer = this.add.container(0, 0).setScrollFactor(0).setDepth(DEPTH_SLOTBAR);
+    this.slotBarLayer = layer;
+    this.slotBarBounds = new Phaser.Geom.Rectangle(barX, barY, barW, barH);
     layer.add(this.add.rectangle(barX, barY, barW, barH, 0x2a1a10).setOrigin(0, 0));
     layer.add(this.add.rectangle(barX + 3, barY + 3, barW - 6, barH - 6, 0x7b4a27).setOrigin(0, 0));
     layer.add(this.add.rectangle(barX + 6, barY + 6, barW - 12, barH - 12, 0x3a2418).setOrigin(0, 0));
@@ -634,6 +708,18 @@ export class FarmScene extends Phaser.Scene {
       layer.add(this.add.text(cx - SLOT_ICON / 2, cy - SLOT_ICON / 2 - 6, String(i + 1), {
         fontFamily: 'monospace', fontSize: '10px', color: '#3a2a17',
       }).setOrigin(0, 0));
+
+      // Contador de cacau colhido (substitui o inventário): badge no slot Cacau.
+      if (def.tool === 'cacao') {
+        this.cacauBadge = this.add
+          .text(sx + SLOT_SIZE - 3, sy + SLOT_SIZE - 3, 'x0', {
+            fontFamily: 'monospace', fontSize: '12px', color: '#ffd34a',
+            backgroundColor: '#2a1a10cc',
+          })
+          .setOrigin(1, 1)
+          .setPadding(3, 1, 3, 1);
+        layer.add(this.cacauBadge);
+      }
 
       const selector = this.add
         .rectangle(cx, cy, SLOT_SIZE - 4, SLOT_SIZE - 4)
@@ -667,7 +753,7 @@ export class FarmScene extends Phaser.Scene {
 
   /** Escolhe um slot: ferramenta vira ativa; ação imediata executa na hora. */
   private chooseSlot(i: number): void {
-    if (this.endOverlay || this.invOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
     const def = this.slots[i]?.def;
     if (!def) return;
     if (def.kind === 'tool' && def.tool) this.setTool(def.tool);
@@ -688,10 +774,8 @@ export class FarmScene extends Phaser.Scene {
       else if (code === keys.sleep) this.doSleep();
       else if (code === keys.sell) this.doSell();
       else if (code === keys.replant) this.doReplant();
-      else if (code === keys.inventory) this.toggleInventory();
       else if (code === keys.pause || code === 'ESC') {
-        if (this.invOverlay) this.toggleInventory();
-        else if (this.helpOverlay) this.toggleHelp();
+        if (this.helpOverlay) this.toggleHelp();
         else if (this.saleOverlay) this.toggleSales();
         else this.pauseGame();
       }
@@ -705,7 +789,7 @@ export class FarmScene extends Phaser.Scene {
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (!this.settings.mouseEnabled) return;
-      if (this.endOverlay || this.invOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+      if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
       if (pointer.y > this.scale.height - SLOT_BAR_H - 16 || pointer.y < 42) return;
       const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
       this.mouseTarget = new Phaser.Math.Vector2(world.x, world.y);
@@ -761,7 +845,7 @@ export class FarmScene extends Phaser.Scene {
   // ─── Ações do adapter ───────────────────────────────────────────────────────
 
   private doAction(): void {
-    if (this.endOverlay || this.invOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
     if (this.nearDoor()) {
       this.enterHouse();
       return;
@@ -801,7 +885,7 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private doReplant(): void {
-    if (this.endOverlay || this.invOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
     const c = this.findReplantCandidate();
     if (!c) {
       this.showToast('Nenhuma nativa recém-plantada por perto para replantar.');
@@ -843,7 +927,7 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private doSleep(): void {
-    if (this.endOverlay || this.invOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
     if (!this.nearDoor()) {
       this.showToast('Vá até a porta da casa para dormir.');
       return;
@@ -852,7 +936,7 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private doSell(): void {
-    if (this.endOverlay || this.invOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
     if (!this.nearMarket()) {
       this.showToast('Vá até a banca para vender cacau.');
       return;
@@ -970,61 +1054,6 @@ export class FarmScene extends Phaser.Scene {
     return panel;
   }
 
-  // ─── Inventário (modal) ───────────────────────────────────────────────────────
-
-  /** Abre/fecha o inventário. Enquanto aberto, o mundo fica congelado. */
-  private toggleInventory(): void {
-    if (this.endOverlay || this.saleOverlay || this.helpOverlay) return;
-    if (this.invOverlay) {
-      this.invOverlay.destroy();
-      this.invOverlay = undefined;
-      return;
-    }
-    this.invOverlay = this.buildInventory();
-  }
-
-  /** Modal com a grade de slots do inventário, lida de `farm.snapshot()`. */
-  private buildInventory(): Phaser.GameObjects.Container {
-    const inv = this.farm.snapshot().inventory;
-    const panel = new Panel(this, { width: 340, height: 380, title: 'Inventário' });
-    panel.setScrollFactor(0);
-
-    // Bloqueia cliques no mundo/hotbar atrás do modal.
-    const blocker = this.add
-      .rectangle(0, 0, this.scale.width, this.scale.height, 0xffffff, 0.001)
-      .setInteractive();
-    panel.addContent(blocker);
-
-    const cols = 3;
-    const cell = 84;
-    const gap = 8;
-    const startX = -((cols - 1) * (cell + gap)) / 2;
-    const startY = -70;
-    inv.forEach((slot, i) => {
-      const cx = startX + (i % cols) * (cell + gap);
-      const cy = startY + Math.floor(i / cols) * (cell + gap);
-      panel.addContent(
-        this.add.rectangle(cx, cy, cell, cell, UI.color.panel).setStrokeStyle(2, UI.color.stroke),
-      );
-      if (slot) {
-        const name = ITEM_LABEL[slot.itemId] ?? slot.itemId;
-        panel.addContent(
-          this.add.text(cx, cy - 10, name, { fontFamily: UI.font, fontSize: UI.size.small, color: UI.text.primary }).setOrigin(0.5),
-          this.add.text(cx, cy + 16, `x${slot.qty}`, { fontFamily: UI.font, fontSize: UI.size.body, color: UI.text.accent }).setOrigin(0.5),
-        );
-      } else {
-        panel.addContent(
-          this.add.text(cx, cy, String(i + 1), { fontFamily: UI.font, fontSize: UI.size.tiny, color: UI.text.muted }).setOrigin(0.5),
-        );
-      }
-    });
-
-    panel.addContent(
-      this.add.text(0, 152, 'I / ESC para fechar', { fontFamily: UI.font, fontSize: UI.size.small, color: UI.text.soft }).setOrigin(0.5),
-    );
-    return panel;
-  }
-
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   private drawMarker(): void {
@@ -1086,6 +1115,7 @@ export class FarmScene extends Phaser.Scene {
     }
 
     this.dayText.setText(`Dia ${Math.min(s.day, s.totalDays)} / ${s.totalDays}`);
+    this.cacauBadge.setText(`x${this.farm.inventory.count(ITEM_CACAU_FRESCO)}`);
     this.energyBar.set(s.energy / s.maxEnergy, `${s.energy}/${s.maxEnergy}`);
     for (const meta of INDICATOR_META) {
       const v = s.indicators[meta.key];
@@ -1137,7 +1167,7 @@ export class FarmScene extends Phaser.Scene {
           this.showToast('Cacau plantado. Durma alguns dias e volte para colher.');
           return;
         case 'harvest':
-          this.showToast(`Cacau colhido: x${this.farm.inventory.count(ITEM_CACAU_FRESCO)} no inventario.`);
+          this.showToast(`Cacau colhido: x${this.farm.inventory.count(ITEM_CACAU_FRESCO)}.`);
           return;
         case 'prune':
           this.showToast('Nativa podada: menos sombra, mais produtividade ao redor.');

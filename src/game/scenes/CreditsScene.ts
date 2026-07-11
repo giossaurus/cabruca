@@ -17,7 +17,9 @@ export class CreditsScene extends Phaser.Scene {
       'Código e jogo\n' +
       'Fabrine Vitoria · Maria Clara Barros · Giovanni Della Dea\n\n' +
       'Assets visuais\n' +
-      'Farm Life Pixel Art Pack – Animated Asset Pack, por sophi-x-x (itch.io)\n\n' +
+      'Farm Life Pixel Art Pack – Animated Asset Pack, por sophi-x-x (itch.io)\n' +
+      'Forest Ground Details Pack, por Pocket Cozy Pixels\n' +
+      'Goldie (cão), por Artoellie (itch.io)\n\n' +
       'Ícones e elementos de UI\n' +
       'Phaser PixUI, por skhoroshavin (itch.io)\n' +
       'skhoroshavin.itch.io/phaser-pixui\n\n' +

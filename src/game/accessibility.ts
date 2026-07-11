@@ -2,7 +2,7 @@ import type { ColorFilter, Settings } from './ui';
 
 const LIVE_ID = 'cabruca-live-region';
 const CANVAS_LABEL =
-  'CABRUCA. Jogo de fazenda em pixel art. Use Tab ou setas nos menus. No jogo, use as teclas configuradas para mover, interagir, abrir inventário e pausar.';
+  'CABRUCA. Jogo de fazenda em pixel art. Use Tab ou setas nos menus. No jogo, use as teclas configuradas para mover, interagir e pausar.';
 
 const FILTERS: Record<ColorFilter, string> = {
   none: 'none',

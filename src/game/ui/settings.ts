@@ -28,7 +28,6 @@ export type ActionId =
   | 'moveLeft'
   | 'moveRight'
   | 'interact'
-  | 'inventory'
   | 'sleep'
   | 'sell'
   | 'replant'
@@ -44,7 +43,6 @@ export const DEFAULT_KEY_BINDINGS: KeyBindings = {
   moveLeft: 'A',
   moveRight: 'D',
   interact: 'E',
-  inventory: 'I',
   sleep: 'Z',
   sell: 'V',
   replant: 'U',
@@ -57,7 +55,6 @@ export const ACTION_LABEL: Record<ActionId, string> = {
   moveLeft: 'Mover esquerda',
   moveRight: 'Mover direita',
   interact: 'Interagir',
-  inventory: 'Inventário',
   sleep: 'Dormir',
   sell: 'Vender',
   replant: 'Replantar/undo',
