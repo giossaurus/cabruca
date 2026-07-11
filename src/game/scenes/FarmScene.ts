@@ -14,6 +14,7 @@ import {
   footRect, treeTrunkRect, type PlotRect,
 } from '../world/geometry';
 import { FogOfWar, buildFarmWorld } from '../world/buildFarmWorld';
+import { Hotbar, type Tool } from '../farm/Hotbar';
 import * as audio from '../audio';
 
 /** Intervalo do autosave periódico (rede de segurança além do save ao dormir). */
@@ -30,39 +31,6 @@ const AUTOSAVE_MS = 60_000;
  * faixa integrada no topo, sobre o mundo; o cacau colhido aparece como contador
  * no próprio slot Cacau da hotbar.
  */
-
-/** Medidas da hotbar pixel UI própria (sem PNG externo). */
-const SLOT_SIZE = 56;
-const SLOT_GAP = 4;
-const SLOT_PAD = 8;
-const SLOT_COUNT = 6;
-const SLOT_BAR_W = SLOT_COUNT * SLOT_SIZE + (SLOT_COUNT - 1) * SLOT_GAP + SLOT_PAD * 2;
-const SLOT_BAR_H = SLOT_SIZE + SLOT_PAD * 2;
-
-type Tool = 'tree' | 'cacao' | 'harvest' | 'prune';
-
-const SLOT_ICON = 40; // px do ícone dentro do slot
-
-/** Definição de um slot da hotbar (ação do jogador simbolizada por ícone/texto). */
-interface SlotDef {
-  readonly key: string; // rótulo curto (placeholder enquanto não há ícone)
-  readonly kind: 'tool' | 'action' | 'empty';
-  readonly tool?: Tool; // slots de ferramenta (aplicadas no tile com E/Espaço)
-  readonly run?: () => void; // slots de ação imediata (dormir/vender)
-  readonly icon?: string; // textura do ícone (estado normal)
-  readonly iconSelected?: string; // textura quando selecionado/hover
-  readonly iconW?: number;
-  readonly iconH?: number;
-}
-
-interface SlotUI {
-  readonly def: SlotDef;
-  readonly cx: number;
-  readonly cy: number;
-  readonly selector: Phaser.GameObjects.Rectangle;
-  readonly icon: Phaser.GameObjects.Image | undefined;
-  hovered: boolean;
-}
 
 const INDICATOR_META: ReadonlyArray<{ key: IndicatorKey; label: string; color: number }> = [
   { key: 'biodiversidade', label: 'Biodiversidade', color: UI.color.biodiversidade },
@@ -103,11 +71,8 @@ export class FarmScene extends Phaser.Scene {
   private dayText!: Phaser.GameObjects.Text;
   private energyBar!: StatBar;
   private indicatorBars!: Map<IndicatorKey, StatBar>;
-  private slots: SlotUI[] = [];
   private hudLayer!: Phaser.GameObjects.Container;
-  private slotBarLayer!: Phaser.GameObjects.Container;
-  private slotBarBounds!: Phaser.Geom.Rectangle;
-  private cacauBadge!: Phaser.GameObjects.Text;
+  private hotbar!: Hotbar;
   private endOverlay: Phaser.GameObjects.Container | undefined;
   private helpOverlay: Phaser.GameObjects.Container | undefined;
   private helpStep = 0;
@@ -130,7 +95,6 @@ export class FarmScene extends Phaser.Scene {
     applyAccessibilitySettings(this.settings);
     this.tool = 'tree';
     this.indicatorBars = new Map();
-    this.slots = [];
     this.endOverlay = undefined;
     this.helpOverlay = undefined;
     this.helpStep = 0;
@@ -177,7 +141,12 @@ export class FarmScene extends Phaser.Scene {
     this.buildHud();
     this.buildHelpButton();
     this.buildInteractionText();
-    this.buildSlotBar();
+    this.hotbar = new Hotbar(this, {
+      isUiLocked: () => Boolean(this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning),
+      onToolSelected: (t) => this.setTool(t),
+      onSleep: () => this.doSleep(),
+      onSell: () => this.doSell(),
+    });
     this.bindInput();
     this.redraw();
     announce(this.settings, 'Jogo iniciado. Use as teclas configuradas, setas como fallback, ou clique no chão para mover.');
@@ -215,7 +184,7 @@ export class FarmScene extends Phaser.Scene {
     const screen = new Phaser.Geom.Rectangle(b.x - cam.scrollX, b.y - cam.scrollY, b.width, b.height);
     const hudRect = new Phaser.Geom.Rectangle(0, 0, this.scale.width, 38);
     this.hudLayer.setAlpha(Phaser.Geom.Rectangle.Overlaps(screen, hudRect) ? 0.5 : 1);
-    this.slotBarLayer.setAlpha(Phaser.Geom.Rectangle.Overlaps(screen, this.slotBarBounds) ? 0.5 : 1);
+    this.hotbar.setAlpha(Phaser.Geom.Rectangle.Overlaps(screen, this.hotbar.bounds) ? 0.5 : 1);
   }
 
   // ─── Locais interativos ────────────────────────────────────────────────────
@@ -387,7 +356,7 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private buildInteractionText(): void {
-    const y = this.scale.height - SLOT_BAR_H - 22;
+    const y = this.scale.height - Hotbar.BAR_H - 22;
     this.interactionHint = this.add.text(this.scale.width / 2, y, '', {
       fontFamily: UI.font, fontSize: UI.size.small, color: UI.text.primary,
       backgroundColor: '#05100a',
@@ -501,96 +470,6 @@ export class FarmScene extends Phaser.Scene {
     this.renderHelpStep?.();
   }
 
-  /** Hotbar pixel UI própria: 9 slots de ações sem PNG proprietário. */
-  private buildSlotBar(): void {
-    const barW = SLOT_BAR_W; // largura fixa (não acompanha o talhão largo)
-    const barH = SLOT_BAR_H;
-    const barX = (this.scale.width - barW) / 2; // centralizada
-    const barY = this.scale.height - barH - 10; // fixa no rodapé da VIEWPORT
-
-    // Container fixo à câmera (a câmera segue o jogador) e acima da névoa.
-    const layer = this.add.container(0, 0).setScrollFactor(0).setDepth(DEPTH.slotbar);
-    this.slotBarLayer = layer;
-    this.slotBarBounds = new Phaser.Geom.Rectangle(barX, barY, barW, barH);
-    layer.add(this.add.rectangle(barX, barY, barW, barH, 0x2a1a10).setOrigin(0, 0));
-    layer.add(this.add.rectangle(barX + 3, barY + 3, barW - 6, barH - 6, 0x7b4a27).setOrigin(0, 0));
-    layer.add(this.add.rectangle(barX + 6, barY + 6, barW - 12, barH - 12, 0x3a2418).setOrigin(0, 0));
-
-    const defs = this.slotDefs();
-    const cy = barY + SLOT_PAD + SLOT_SIZE / 2;
-    defs.forEach((def, i) => {
-      const sx = barX + SLOT_PAD + i * (SLOT_SIZE + SLOT_GAP);
-      const sy = barY + SLOT_PAD;
-      const cx = sx + SLOT_SIZE / 2;
-      layer.add(this.add.rectangle(sx, sy, SLOT_SIZE, SLOT_SIZE, 0xd1a184).setOrigin(0, 0));
-      layer.add(this.add.rectangle(sx + 4, sy + 4, SLOT_SIZE - 8, SLOT_SIZE - 8, 0x5a3822).setOrigin(0, 0));
-      layer.add(this.add.rectangle(sx + 6, sy + 6, SLOT_SIZE - 12, SLOT_SIZE - 12, 0xe2b79e).setOrigin(0, 0).setAlpha(0.82));
-
-      let icon: Phaser.GameObjects.Image | undefined;
-      if (def.icon) {
-        icon = this.add.image(cx, cy, def.icon).setDisplaySize(def.iconW ?? SLOT_ICON, def.iconH ?? SLOT_ICON);
-        layer.add(icon);
-      } else if (def.kind !== 'empty') {
-        layer.add(this.add.text(cx, cy, def.key, {
-          fontFamily: 'monospace', fontSize: '11px', color: '#f2e6cf', align: 'center',
-        }).setOrigin(0.5));
-      }
-      // número do slot (canto superior esquerdo)
-      layer.add(this.add.text(cx - SLOT_ICON / 2, cy - SLOT_ICON / 2 - 6, String(i + 1), {
-        fontFamily: 'monospace', fontSize: '10px', color: '#3a2a17',
-      }).setOrigin(0, 0));
-
-      // Contador de cacau colhido (substitui o inventário): badge no slot Cacau.
-      if (def.tool === 'cacao') {
-        this.cacauBadge = this.add
-          .text(sx + SLOT_SIZE - 3, sy + SLOT_SIZE - 3, 'x0', {
-            fontFamily: 'monospace', fontSize: '12px', color: '#ffd34a',
-            backgroundColor: '#2a1a10cc',
-          })
-          .setOrigin(1, 1)
-          .setPadding(3, 1, 3, 1);
-        layer.add(this.cacauBadge);
-      }
-
-      const selector = this.add
-        .rectangle(cx, cy, SLOT_SIZE - 4, SLOT_SIZE - 4)
-        .setStrokeStyle(3, 0xffffff, 0.95).setVisible(false);
-      layer.add(selector);
-
-      const ui: SlotUI = { def, cx, cy, selector, icon, hovered: false };
-      this.slots.push(ui);
-
-      // hitbox transparente clicável cobrindo o slot
-      const hit = this.add
-        .rectangle(cx, cy, SLOT_SIZE, SLOT_SIZE, 0xffffff, 0.001)
-        .setScrollFactor(0).setInteractive({ useHandCursor: def.kind !== 'empty' });
-      hit.on('pointerover', () => { ui.hovered = true; this.refreshSlots(); });
-      hit.on('pointerout', () => { ui.hovered = false; this.refreshSlots(); });
-      hit.on('pointerdown', () => this.chooseSlot(i));
-      layer.add(hit);
-    });
-  }
-
-  private slotDefs(): SlotDef[] {
-    return [
-      { key: 'Nativa', kind: 'tool', tool: 'tree', icon: TextureKey.Seedling, iconW: 22, iconH: 44 },
-      { key: 'Cacau', kind: 'tool', tool: 'cacao', icon: TextureKey.IconCacao },
-      { key: 'Colher', kind: 'tool', tool: 'harvest', icon: TextureKey.IconHarvest },
-      { key: 'Podar', kind: 'tool', tool: 'prune', icon: TextureKey.IconPrune },
-      { key: 'Dormir', kind: 'action', run: () => this.doSleep(), icon: TextureKey.CottageClosed, iconW: 40, iconH: 42 },
-      { key: 'Vender', kind: 'action', run: () => this.doSell(), icon: TextureKey.IconSell },
-    ];
-  }
-
-  /** Escolhe um slot: ferramenta vira ativa; ação imediata executa na hora. */
-  private chooseSlot(i: number): void {
-    if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
-    const def = this.slots[i]?.def;
-    if (!def) return;
-    if (def.kind === 'tool' && def.tool) this.setTool(def.tool);
-    else if (def.kind === 'action' && def.run) def.run();
-  }
-
   private bindInput(): void {
     const kb = this.input.keyboard;
     if (!kb) return;
@@ -619,14 +498,14 @@ export class FarmScene extends Phaser.Scene {
 
     // Slots 1-9 (estilo Minecraft): seleciona ferramenta ou dispara a ação.
     const numKeys = ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX'];
-    numKeys.forEach((k, i) => kb.on(`keydown-${k}`, () => this.chooseSlot(i)));
+    numKeys.forEach((k, i) => kb.on(`keydown-${k}`, () => this.hotbar.choose(i)));
 
     kb.on('keydown-R', () => this.restart());
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (!this.settings.mouseEnabled) return;
       if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
-      if (pointer.y > this.scale.height - SLOT_BAR_H - 16 || pointer.y < 42) return;
+      if (pointer.y > this.scale.height - Hotbar.BAR_H - 16 || pointer.y < 42) return;
       const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
       this.mouseTarget = new Phaser.Math.Vector2(world.x, world.y);
     });
@@ -717,7 +596,7 @@ export class FarmScene extends Phaser.Scene {
 
   private setTool(tool: Tool): void {
     this.tool = tool;
-    this.refreshSlots();
+    this.hotbar.setTool(tool);
   }
 
   private doReplant(): void {
@@ -952,13 +831,12 @@ export class FarmScene extends Phaser.Scene {
     }
 
     this.dayText.setText(`Dia ${Math.min(s.day, s.totalDays)} / ${s.totalDays}`);
-    this.cacauBadge.setText(`x${this.farm.inventory.count(ITEM_CACAU_FRESCO)}`);
+    this.hotbar.setCacaoCount(this.farm.inventory.count(ITEM_CACAU_FRESCO));
     this.energyBar.set(s.energy / s.maxEnergy, `${s.energy}/${s.maxEnergy}`);
     for (const meta of INDICATOR_META) {
       const v = s.indicators[meta.key];
       this.indicatorBars.get(meta.key)!.set(v / 100, String(Math.round(v)));
     }
-    this.refreshSlots();
 
     if (s.phase !== 'jogando') this.showEnd(s.phase, s.indicators);
   }
@@ -1067,19 +945,5 @@ export class FarmScene extends Phaser.Scene {
       delay: 1500,
       onComplete: () => this.updateInteractionText(),
     });
-  }
-
-  /** Atualiza o realce do slot ativo e os estados visuais dos ícones. */
-  private refreshSlots(): void {
-    for (const s of this.slots) {
-      const selected = s.def.kind === 'tool' && s.def.tool === this.tool;
-      s.selector.setVisible(selected);
-      if (s.icon && s.def.icon) {
-        const useSelected = selected || s.hovered;
-        s.icon.setTexture(useSelected && s.def.iconSelected ? s.def.iconSelected : s.def.icon);
-        s.icon.setDisplaySize(s.def.iconW ?? SLOT_ICON, s.def.iconH ?? SLOT_ICON);
-        s.icon.setAlpha(s.def.kind === 'empty' ? 0.35 : 1);
-      }
-    }
   }
 }
