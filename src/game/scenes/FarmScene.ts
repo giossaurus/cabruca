@@ -11,8 +11,9 @@ import { clearSave, loadFarm, writeSave } from '../save';
 import { DEPTH } from '../depths';
 import {
   GRID_OX, GRID_OY, WORLD_H, WORLD_W,
-  footRect, insidePlot, treeTrunkRect, type PlotRect,
+  footRect, treeTrunkRect, type PlotRect,
 } from '../world/geometry';
+import { FogOfWar, buildFarmWorld } from '../world/buildFarmWorld';
 import * as audio from '../audio';
 
 /** Intervalo do autosave periódico (rede de segurança além do save ao dormir). */
@@ -37,9 +38,6 @@ const SLOT_PAD = 8;
 const SLOT_COUNT = 6;
 const SLOT_BAR_W = SLOT_COUNT * SLOT_SIZE + (SLOT_COUNT - 1) * SLOT_GAP + SLOT_PAD * 2;
 const SLOT_BAR_H = SLOT_SIZE + SLOT_PAD * 2;
-
-/** Diâmetro do "pincel" que apaga a névoa ao redor do jogador (raio ~150px). */
-const FOG_BRUSH = 300;
 
 type Tool = 'tree' | 'cacao' | 'harvest' | 'prune';
 
@@ -96,7 +94,7 @@ export class FarmScene extends Phaser.Scene {
   private shadeGfx!: Phaser.GameObjects.Graphics;
   private markerGfx!: Phaser.GameObjects.Graphics;
 
-  private fog!: Phaser.GameObjects.RenderTexture;
+  private fog!: FogOfWar;
   private obstacles: Phaser.Geom.Rectangle[] = [];
   private doorZone!: Phaser.Geom.Rectangle;
   private saleZone!: Phaser.Geom.Rectangle;
@@ -159,12 +157,10 @@ export class FarmScene extends Phaser.Scene {
     this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
     this.plot = { ox: GRID_OX, oy: GRID_OY, cols: this.farm.grid.width, rows: this.farm.grid.height };
 
-    this.drawGrassBackground();
-    this.drawPlantableGround();
-    this.buildHouse();
-    this.buildMarketStand();
-    this.buildDecorations();
-    this.scatterForestDetails();
+    const farmWorld = buildFarmWorld(this, this.plot);
+    this.obstacles = farmWorld.obstacles;
+    this.doorZone = farmWorld.doorZone;
+    this.saleZone = farmWorld.saleZone;
     this.shadeGfx = this.add.graphics().setDepth(-10);
     this.plantLayer = this.add.container(0, 0).setDepth(0);
     this.markerGfx = this.add.graphics().setDepth(1);
@@ -176,7 +172,8 @@ export class FarmScene extends Phaser.Scene {
     // Cão de estimação: brinca pelo cenário e segue o dono (pura ambientação).
     this.dog = new Dog(this, world, this.plot, this.player.worldX + 74, this.player.worldY + 34);
 
-    this.buildFog();
+    this.fog = new FogOfWar(this);
+    this.fog.revealPlotStart(this.plot);
     this.buildHud();
     this.buildHelpButton();
     this.buildInteractionText();
@@ -199,7 +196,7 @@ export class FarmScene extends Phaser.Scene {
     if (this.endOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
     this.player.update(deltaMs, this.readDir(), this.moveSpeedScale());
     this.dog.update(deltaMs, this.player.worldX, this.player.worldY);
-    this.revealFog();
+    this.fog.reveal(this.player.worldX, this.player.worldY);
     this.updateInteractionText();
     this.drawMarker();
     this.fadeBarsUnderPlayer();
@@ -219,220 +216,6 @@ export class FarmScene extends Phaser.Scene {
     const hudRect = new Phaser.Geom.Rectangle(0, 0, this.scale.width, 38);
     this.hudLayer.setAlpha(Phaser.Geom.Rectangle.Overlaps(screen, hudRect) ? 0.5 : 1);
     this.slotBarLayer.setAlpha(Phaser.Geom.Rectangle.Overlaps(screen, this.slotBarBounds) ? 0.5 : 1);
-  }
-
-  // ─── Setup estático ─────────────────────────────────────────────────────────
-
-  private drawGrassBackground(): void {
-    // Grama do pack (tile 16px) cobrindo TODO o MUNDO, ladrilhada em passos de
-    // TILE (upscale ×4, nearest-neighbor via pixelArt) — nítida e sem borda.
-    const bg = this.add.container(0, 0).setDepth(-22);
-    const cols = Math.ceil(WORLD_W / TILE);
-    const rows = Math.ceil(WORLD_H / TILE);
-    for (let y = 0; y < rows; y++) {
-      for (let x = 0; x < cols; x++) {
-        bg.add(
-          this.add.image(x * TILE, y * TILE, TextureKey.Grass).setOrigin(0, 0).setDisplaySize(TILE, TILE),
-        );
-      }
-    }
-    // Contorno sutil do talhão jogável — parte da visualização da grade de
-    // sombra (só QA, ver GRID_DEBUG); invisível no gameplay normal.
-    if (GRID_DEBUG) {
-      const w = this.farm.grid.width * TILE;
-      const h = this.farm.grid.height * TILE;
-      this.add.rectangle(GRID_OX + w / 2, GRID_OY + h / 2, w, h)
-        .setStrokeStyle(2, 0x2a5d34, 0.5).setDepth(-19);
-    }
-  }
-
-  /** Tiles plantáveis do talhão: visíveis, mas sem colisão. */
-  private drawPlantableGround(): void {
-    const layer = this.add.container(0, 0).setDepth(-18);
-    for (let y = 0; y < this.farm.grid.height; y++) {
-      for (let x = 0; x < this.farm.grid.width; x++) {
-        const px = GRID_OX + x * TILE;
-        const py = GRID_OY + y * TILE;
-        const tile = this.add.image(px, py, TextureKey.Bed)
-          .setOrigin(0, 0)
-          .setDisplaySize(TILE, TILE)
-          .setAlpha(0.34)
-          .setTint(0xb6965d);
-        layer.add(tile);
-      }
-    }
-  }
-
-  /**
-   * Decoração de ambiente (pedras, arbustos, flores) espalhada pelo MUNDO, fora
-   * do talhão, dando o que revelar ao explorar. Puramente cosmética. Posições
-   * fixas (pseudo-aleatórias por semente) para leitura estável entre sessões.
-   */
-  private buildDecorations(): void {
-    const keys = [TextureKey.DecorBush, TextureKey.DecorStone, TextureKey.DecorFlower];
-    const reserved = [
-      new Phaser.Geom.Rectangle(this.doorZone.x - 190, this.doorZone.y - 140, this.doorZone.width + 380, 330),
-      new Phaser.Geom.Rectangle(this.saleZone.x - 130, this.saleZone.y - 120, this.saleZone.width + 260, 250),
-    ];
-    // Gerador determinístico (LCG) → mesmo cenário todo restart.
-    let seed = 1337;
-    const rnd = (): number => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
-    for (let i = 0; i < 90; i++) {
-      const x = 40 + rnd() * (WORLD_W - 80);
-      const y = 60 + rnd() * (WORLD_H - 100);
-      if (insidePlot(this.plot, x, y, 40)) continue; // não polui a área jogável
-      const key = keys[Math.floor(rnd() * keys.length)]!;
-      const scale = key === TextureKey.DecorFlower ? 2.6 + rnd() * 1.2 : 3 + rnd() * 1.4;
-      const hitW = key === TextureKey.DecorBush ? 22 * scale : 18 * scale;
-      const hitH = key === TextureKey.DecorBush ? 10 * scale : 9 * scale;
-      const hit = new Phaser.Geom.Rectangle(x - hitW / 2, y - hitH, hitW, hitH);
-      if (reserved.some((r) => Phaser.Geom.Rectangle.Overlaps(hit, r))) continue;
-      if (key !== TextureKey.DecorFlower && this.obstacles.some((o) => Phaser.Geom.Rectangle.Overlaps(hit, o))) continue;
-      // Flores são rasteiras (depth baixo fixo, sob o jogador); arbustos e pedras
-      // são volumes e ordenam por Y com o jogador (base em y por causa do origin 1).
-      const depth = key === TextureKey.DecorFlower ? -15 : Math.min(Math.round(y), DEPTH.fog - 10);
-      this.add.image(x, y, key).setOrigin(0.5, 1).setScale(scale).setDepth(depth);
-      if (key !== TextureKey.DecorFlower) this.obstacles.push(hit);
-    }
-  }
-
-  /**
-   * Detalhes de chão de floresta (Pocket Cozy Pixels) espalhados FORA do talhão:
-   * manchas deitadas (FLAT, sob a decoração) e volumes em pé (PROP, ordenados por
-   * Y com o jogador). Puramente cosmético, sem colisão. Semente própria para não
-   * repetir as posições do decor; determinístico entre sessões.
-   */
-  private scatterForestDetails(): void {
-    const reserved = [
-      new Phaser.Geom.Rectangle(this.doorZone.x - 190, this.doorZone.y - 140, this.doorZone.width + 380, 330),
-      new Phaser.Geom.Rectangle(this.saleZone.x - 130, this.saleZone.y - 120, this.saleZone.width + 260, 250),
-    ];
-    const blocked = (r: Phaser.Geom.Rectangle): boolean =>
-      reserved.some((z) => Phaser.Geom.Rectangle.Overlaps(r, z));
-
-    let seed = 90210;
-    const rnd = (): number => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
-    const pick = (arr: readonly string[]): string => arr[Math.floor(rnd() * arr.length)]!;
-
-    const place = (key: string, flat: boolean): void => {
-      const x = 30 + rnd() * (WORLD_W - 60);
-      const y = 50 + rnd() * (WORLD_H - 80);
-      // Buffer maior que o decor (48 vs 40): nada encostando nos tiles de cacau.
-      if (insidePlot(this.plot, x, y, 48)) return;
-      const src = this.textures.get(key).getSourceImage();
-      const targetH = flat ? 52 + rnd() * 28 : 40 + rnd() * 30;
-      const s = targetH / src.height;
-      const w = src.width * s;
-      if (flat) {
-        if (blocked(new Phaser.Geom.Rectangle(x - w / 2, y - targetH / 2, w, targetH))) return;
-        this.add.image(x, y, key).setOrigin(0.5, 0.5).setScale(s).setDepth(-18).setAlpha(0.92);
-      } else {
-        if (blocked(new Phaser.Geom.Rectangle(x - w / 2, y - targetH, w, targetH))) return;
-        // Ordena com o jogador, mas sempre sob o fog (DEPTH.fog = 1400).
-        this.add.image(x, y, key).setOrigin(0.5, 1).setScale(s).setDepth(Math.min(Math.round(y), DEPTH.fog - 10));
-      }
-    };
-
-    for (let i = 0; i < 30; i++) place(pick(FOREST_FLAT_KEYS), true);
-    for (let i = 0; i < 64; i++) place(pick(FOREST_PROP_KEYS), false);
-  }
-
-  /**
-   * Casa ao norte/nordeste do talhão. Corpo sólido (colisão) + uma "porta" na
-   * base: estando nela, E/Espaço/Z dispara a transição de dia. Depth pela base
-   * → o jogador passa na frente/atrás corretamente.
-   */
-  private buildHouse(): void {
-    const src = this.textures.get(TextureKey.CottageClosed).getSourceImage();
-    const dispH = 300;
-    const dispW = dispH * (src.width / src.height);
-    const baseX = GRID_OX + this.farm.grid.width * TILE * 0.72; // nordeste do talhão
-    const baseY = GRID_OY - 210; // ao norte, com folga entre casa e talhão
-
-    const g = this.add.graphics().setDepth(baseY - 2);
-    g.fillStyle(0x07110a, 0.24).fillEllipse(baseX, baseY - 8, dispW * 0.72, 42);
-    g.fillStyle(0x9b6b3f, 0.75).fillRoundedRect(baseX - 36, baseY - 76, 72, 92, 8);
-
-    this.add.image(baseX, baseY, TextureKey.CottageClosed)
-      .setOrigin(0.5, 1)
-      .setDisplaySize(dispW, dispH)
-      .setDepth(baseY);
-
-    for (let y = baseY + 8; y < GRID_OY + 10; y += TILE) {
-      this.add.image(baseX, y, TextureKey.Bed).setOrigin(0.5, 0.5).setDisplaySize(TILE, TILE * 0.62).setDepth(-14);
-    }
-    this.add.image(baseX - dispW * 0.36, baseY - 6, TextureKey.DecorBush).setOrigin(0.5, 1).setScale(2.6).setDepth(baseY + 1);
-    this.add.image(baseX + dispW * 0.34, baseY - 6, TextureKey.DecorFlower).setOrigin(0.5, 1).setScale(3.2).setDepth(baseY + 1);
-
-    // Corpo sólido: cobre paredes/telhado, deixando a base (porta + chão) livre.
-    this.obstacles.push(new Phaser.Geom.Rectangle(
-      baseX - dispW * 0.44, baseY - dispH * 0.86, dispW * 0.88, dispH * 0.62,
-    ));
-    // Porta: faixa estreita na base-central; pisar aqui entra na casa.
-    this.doorZone = new Phaser.Geom.Rectangle(baseX - 36, baseY - dispH * 0.24, 72, dispH * 0.24 + 10);
-  }
-
-  /** Banca física de venda: aproxima, aperta E/V e abre o menu de vendas. */
-  private buildMarketStand(): void {
-    const baseX = GRID_OX + 112;
-    const baseY = GRID_OY - 28;
-    const standW = 118;
-    const standH = 118;
-
-    // Só uma sombra suave no chão (sem bloco de "terra" retangular, que criava
-    // uma borda dura sobrepondo a grama/talhão).
-    const g = this.add.graphics().setDepth(baseY - 3);
-    g.fillStyle(0x07110a, 0.22).fillEllipse(baseX, baseY - 8, standW * 0.82, 26);
-    this.add.image(baseX, baseY, TextureKey.MarketStand)
-      .setOrigin(0.5, 1)
-      .setDisplaySize(standW, standH)
-      .setDepth(baseY);
-    this.add.text(baseX, baseY - standH + 6, 'VENDA', {
-      fontFamily: UI.font, fontSize: UI.size.tiny, color: UI.text.primary,
-      backgroundColor: '#5d3a22',
-    }).setOrigin(0.5).setPadding(4, 2, 4, 2).setDepth(baseY + 1);
-
-    this.obstacles.push(new Phaser.Geom.Rectangle(baseX - 48, baseY - 76, 96, 58));
-    this.saleZone = new Phaser.Geom.Rectangle(baseX - 58, baseY - 20, 116, 70);
-  }
-
-  // ─── Névoa (fog of war) ─────────────────────────────────────────────────────
-
-  /** Névoa cobrindo o mundo; o explorado é apagado (permanente). */
-  private buildFog(): void {
-    this.makeFogBrush();
-    this.fog = this.add.renderTexture(0, 0, WORLD_W, WORLD_H).setOrigin(0, 0).setDepth(DEPTH.fog);
-    this.fog.fill(0x0b130e, 1);
-    // Revela o talhão + arredores de início (senão o jogador nasce "no escuro").
-    const cx = GRID_OX + (this.farm.grid.width * TILE) / 2;
-    const cy = GRID_OY + (this.farm.grid.height * TILE) / 2;
-    const halfW = (this.farm.grid.width * TILE) / 2 + 130;
-    const halfH = (this.farm.grid.height * TILE) / 2 + 130;
-    for (let y = cy - halfH; y <= cy + halfH; y += 90) {
-      for (let x = cx - halfW; x <= cx + halfW; x += 90) this.eraseFog(x, y);
-    }
-  }
-
-  /** Pincel radial suave (opaco no centro, some na borda) gerado uma vez. */
-  private makeFogBrush(): void {
-    if (this.textures.exists('fog_brush')) return;
-    const g = this.make.graphics({ x: 0, y: 0 }, false);
-    const steps = 44;
-    for (let i = 0; i < steps; i++) {
-      const r = (FOG_BRUSH / 2) * (1 - i / steps);
-      g.fillStyle(0xffffff, 0.07).fillCircle(FOG_BRUSH / 2, FOG_BRUSH / 2, r);
-    }
-    g.generateTexture('fog_brush', FOG_BRUSH, FOG_BRUSH);
-    g.destroy();
-  }
-
-  /** Apaga a névoa (mundo-coords) centrando o pincel em (x,y). */
-  private eraseFog(x: number, y: number): void {
-    this.fog.erase('fog_brush', x - FOG_BRUSH / 2, y - FOG_BRUSH / 2);
-  }
-
-  private revealFog(): void {
-    this.eraseFog(this.player.worldX, this.player.worldY);
   }
 
   // ─── Locais interativos ────────────────────────────────────────────────────
