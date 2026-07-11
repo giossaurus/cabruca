@@ -21,6 +21,7 @@ export class Slider extends Phaser.GameObjects.Container {
   private readonly onChange: (value: number) => void;
   private _value: number;
   private dragging = false;
+  private focused = false;
 
   constructor(scene: Phaser.Scene, cfg: SliderConfig) {
     super(scene, cfg.x, cfg.y);
@@ -71,5 +72,15 @@ export class Slider extends Phaser.GameObjects.Container {
     this.fill.width = this.trackW * this._value;
     this.knob.x = this.trackW * this._value;
     this.onChange(this._value);
+  }
+
+  nudge(delta: number): void {
+    this.setValue(this._value + delta);
+  }
+
+  setFocused(focused: boolean): this {
+    this.focused = focused;
+    this.knob.setStrokeStyle(focused ? 4 : 2, focused ? UI.color.primaryHover : UI.color.stroke);
+    return this;
   }
 }

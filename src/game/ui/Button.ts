@@ -27,6 +27,7 @@ export class Button extends Phaser.GameObjects.Container {
   private readonly variant: ButtonVariant;
   private readonly onClick: () => void;
   private _enabled = true;
+  private focused = false;
 
   constructor(scene: Phaser.Scene, cfg: ButtonConfig) {
     super(scene, cfg.x, cfg.y);
@@ -69,9 +70,29 @@ export class Button extends Phaser.GameObjects.Container {
     return this;
   }
 
+  get enabled(): boolean {
+    return this._enabled;
+  }
+
   setLabel(text: string): this {
     this.label.setText(text);
     return this;
+  }
+
+  setFocused(focused: boolean): this {
+    this.focused = focused;
+    this.paint(focused ? 'hover' : 'idle');
+    return this;
+  }
+
+  activate(): void {
+    if (!this._enabled) return;
+    this.paint('down');
+    this.scene.time.delayedCall(70, () => {
+      if (!this.active || !this.bg.active) return;
+      this.paint(this.focused ? 'hover' : 'idle');
+    });
+    this.onClick();
   }
 
   private fillFor(state: 'idle' | 'hover' | 'down'): number {
@@ -86,6 +107,7 @@ export class Button extends Phaser.GameObjects.Container {
 
   private paint(state: 'idle' | 'hover' | 'down'): void {
     this.bg.setFillStyle(this.fillFor(state));
+    this.bg.setStrokeStyle(this.focused ? 4 : 2, this.focused ? UI.color.primaryHover : UI.color.stroke);
     const enabledColor = this.variant === 'primary' ? UI.text.onPrimary : UI.text.primary;
     this.label.setColor(this._enabled ? enabledColor : UI.text.muted);
   }

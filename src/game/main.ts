@@ -4,10 +4,12 @@
 // QA exploratória manual.
 import Phaser from 'phaser';
 import { BootScene } from './scenes/BootScene';
+import { SplashScene } from './scenes/SplashScene';
 import { MenuScene } from './scenes/MenuScene';
 import { FarmScene } from './scenes/FarmScene';
 import { PauseScene } from './scenes/PauseScene';
 import { OptionsScene } from './scenes/OptionsScene';
+import { CreditsScene } from './scenes/CreditsScene';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -21,8 +23,8 @@ const config: Phaser.Types.Core.GameConfig = {
   // seria decodificada inteira para PCM (~1 GB de RAM). Em HTML5 toca por streaming,
   // com RAM baixa independente da duração. Ver src/game/audio.ts.
   audio: { disableWebAudio: true },
-  // Boot → Menu → Farm; Pause/Options são lançadas por cima sob demanda.
-  scene: [BootScene, MenuScene, FarmScene, PauseScene, OptionsScene],
+  // Boot → Splash → Menu → Farm; Pause/Options/Credits são sobreposições.
+  scene: [BootScene, SplashScene, MenuScene, FarmScene, PauseScene, OptionsScene, CreditsScene],
   scale: {
     parent: 'app',
     mode: Phaser.Scale.FIT,

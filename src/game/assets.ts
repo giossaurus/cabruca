@@ -21,6 +21,7 @@ export const TextureKey = {
   DecorFlower: 'decor_flower',
   DecorStone: 'decor_stone',
   House: 'house', // casa ao norte (entrar = transição de dia)
+  CottageClosed: 'cottage_closed',
   // Cacau (procedural — ver createPlaceholderTextures).
   CacaoMuda: 'cacao_muda',
   CacaoJovem: 'cacao_jovem',
@@ -30,10 +31,18 @@ export const TextureKey = {
   // Jogador (spritesheets direcionais do pack).
   PlayerIdle: 'player_idle',
   PlayerWalk: 'player_walk',
-  // UI (assets custom já existentes).
-  SlotBar: 'slot_bar',
-  PodarPrata: 'podar_prata',
-  PodarPreto: 'podar_preto',
+  // UI.
+  MenuBackground: 'menu_background',
+  MenuBackgroundSparseExtraLight: 'menu_background_sparse_extra_light',
+  MenuBackgroundLargeLight: 'menu_background_large_light',
+  MenuBackgroundLargeExtraLight: 'menu_background_large_extra_light',
+  SleepBackgroundStarry: 'sleep_background_starry',
+  ScienzaLogo: 'scienza_logo',
+  IconCacao: 'icon_cacao',
+  IconHarvest: 'icon_harvest',
+  IconPrune: 'icon_prune',
+  IconSell: 'icon_sell',
+  MarketStand: 'market_stand',
 } as const;
 
 export const TILE = 64;
@@ -125,6 +134,75 @@ export function createPlaceholderTextures(scene: Phaser.Scene): void {
     g.moveTo(S / 2, S - 22);
     g.lineTo(S / 2 + 11, S - 34);
     g.strokePath();
+  });
+
+  // ── Ícones/props de UI no mesmo vocabulário pixel-art do pack Farm Life ──
+  tex(TextureKey.IconCacao, () => {
+    g.fillStyle(0x5d3a22, 1).fillEllipse(29, 35, 24, 34);
+    g.fillStyle(0x8c5126, 1).fillEllipse(35, 31, 20, 30);
+    g.fillStyle(0xe8a43a, 1).fillEllipse(39, 28, 14, 24);
+    g.lineStyle(2, 0x3a2418, 1).strokeEllipse(29, 35, 24, 34).strokeEllipse(35, 31, 20, 30);
+    g.fillStyle(0x5fbf50, 1).fillEllipse(25, 17, 18, 9);
+  });
+  tex(TextureKey.IconHarvest, () => {
+    g.fillStyle(0x6e3e1f, 1).fillRoundedRect(14, 27, 36, 22, 5);
+    g.fillStyle(0xb86f32, 1).fillRoundedRect(17, 24, 30, 22, 4);
+    g.lineStyle(3, 0x3a2418, 1).strokeRoundedRect(14, 27, 36, 22, 5);
+    g.lineStyle(3, 0xd49a54, 1).beginPath();
+    g.arc(32, 28, 16, Math.PI, 0);
+    g.strokePath();
+    g.fillStyle(0xe8a43a, 1).fillEllipse(23, 26, 8, 12).fillEllipse(32, 23, 8, 12).fillEllipse(41, 26, 8, 12);
+  });
+  tex(TextureKey.IconPrune, () => {
+    g.lineStyle(5, 0xd8d8cf, 1);
+    g.beginPath();
+    g.moveTo(18, 42);
+    g.lineTo(44, 18);
+    g.moveTo(46, 42);
+    g.lineTo(22, 18);
+    g.strokePath();
+    g.fillStyle(0x3a2418, 1).fillCircle(20, 45, 7).fillCircle(44, 45, 7);
+    g.fillStyle(0x7bd06a, 1).fillCircle(20, 45, 3).fillCircle(44, 45, 3);
+  });
+  tex(TextureKey.IconSell, () => {
+    g.fillStyle(0x7b4a27, 1).fillRoundedRect(13, 24, 38, 28, 4);
+    g.fillStyle(0xa8642f, 1).fillRect(17, 20, 30, 10);
+    g.lineStyle(3, 0x3a2418, 1).strokeRoundedRect(13, 24, 38, 28, 4).strokeRect(17, 20, 30, 10);
+    g.fillStyle(0xf2c14e, 1).fillCircle(45, 20, 7);
+    g.fillStyle(0x3a2418, 1).fillRect(31, 24, 3, 28);
+  });
+  tex(TextureKey.MarketStand, () => {
+    g.fillStyle(0x2f2117, 0.35).fillEllipse(32, 56, 54, 10);
+    g.fillStyle(0x7b4a27, 1).fillRect(11, 30, 42, 25);
+    g.fillStyle(0xa8642f, 1).fillRect(15, 36, 34, 15);
+    g.lineStyle(3, 0x3a2418, 1).strokeRect(11, 30, 42, 25);
+    g.fillStyle(0xd84b3f, 1).fillRect(8, 18, 12, 13).fillRect(32, 18, 12, 13);
+    g.fillStyle(0xf4d47a, 1).fillRect(20, 18, 12, 13).fillRect(44, 18, 12, 13);
+    g.lineStyle(2, 0x3a2418, 1).strokeRect(8, 18, 48, 13);
+    g.fillStyle(0x4e9e57, 1).fillCircle(22, 34, 4).fillCircle(30, 35, 4).fillCircle(38, 34, 4);
+    g.fillStyle(0xf2c14e, 1).fillCircle(45, 39, 5);
+  });
+  tex(TextureKey.CottageClosed, () => {
+    g.fillStyle(0x2b1b12, 0.35).fillEllipse(32, 59, 58, 10);
+    g.fillStyle(0x6b3f22, 1).fillRect(8, 24, 48, 32);
+    g.fillStyle(0x8b5a32, 1).fillRect(12, 28, 40, 24);
+    g.lineStyle(3, 0x2d1b12, 1).strokeRect(8, 24, 48, 32);
+    for (let y = 31; y <= 49; y += 8) {
+      g.lineStyle(2, 0x4b2c18, 1).lineBetween(10, y, 54, y);
+      g.lineStyle(1, 0xc08a55, 0.65).lineBetween(12, y - 2, 51, y - 2);
+    }
+    g.fillStyle(0x4f2d19, 1).fillRoundedRect(26, 36, 12, 20, 2);
+    g.fillStyle(0xc98b42, 1).fillCircle(35, 46, 2);
+    g.fillStyle(0x9c5930, 1).fillRect(14, 34, 10, 9);
+    g.fillStyle(0xf2d28a, 1).fillRect(16, 36, 6, 5);
+    g.lineStyle(2, 0x2d1b12, 1).strokeRect(14, 34, 10, 9);
+    g.fillStyle(0x3a2418, 1).fillTriangle(4, 26, 32, 4, 60, 26);
+    g.fillStyle(0x7b3f24, 1).fillTriangle(8, 26, 32, 8, 56, 26);
+    g.lineStyle(3, 0x2d1b12, 1).strokeTriangle(4, 26, 32, 4, 60, 26);
+    g.lineStyle(2, 0xb8783c, 1).lineBetween(16, 23, 48, 23);
+    g.lineStyle(2, 0x5c321d, 1).lineBetween(23, 16, 41, 16);
+    g.fillStyle(0x4b2c18, 1).fillRect(44, 11, 8, 13);
+    g.fillStyle(0x2d1b12, 1).fillRect(42, 9, 12, 4);
   });
 
   g.destroy();

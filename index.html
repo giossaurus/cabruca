@@ -5,7 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cabruca — Game Jam "Aqui é BR"</title>
     <style>
-      html, body { margin: 0; height: 100%; background: #14251a; overflow: hidden; }
+      @font-face {
+        font-family: 'RoadPixel';
+        src: url('/RoadPixel.ttf') format('truetype');
+        font-display: swap;
+      }
+
+      /* Fundo das barras de letterbox quando a proporção da janela difere de 3:2.
+         Preto neutro = "barra elegante" (não estica a UI, não corta a HUD). */
+      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+      /* Flex centraliza #app quando a resolução fixa o encolhe (ver display.ts). */
+      body { display: flex; align-items: center; justify-content: center; }
       #app { width: 100%; height: 100%; }
       #app canvas { display: block; }
     </style>

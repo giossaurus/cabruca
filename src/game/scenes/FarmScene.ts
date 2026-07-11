@@ -1,9 +1,10 @@
 import Phaser from 'phaser';
 import { Farm, ITEM_CACAU_FRESCO, type IndicatorKey } from '../../domain';
-import { TILE, TextureKey, cacaoTextureKey } from '../assets';
+import { PLAYER_W, TILE, TextureKey, cacaoTextureKey } from '../assets';
 import { Player } from '../Player';
 import { GRID_DEBUG } from '../debug';
-import { UI, StatBar, Panel, Button, loadSettings } from '../ui';
+import { applyAccessibilitySettings, announce } from '../accessibility';
+import { UI, StatBar, Panel, Button, FocusList, keyLabel, loadSettings, normalizeKeyCode, phaserKeyName, type Settings } from '../ui';
 import * as audio from '../audio';
 
 /**
@@ -12,9 +13,9 @@ import * as audio from '../audio';
  * NENHUMA regra de jogo mora aqui (ADR 0002).
  *
  * Interação cozy: o jogador ANDA pela fazenda (WASD/setas) e age no tile onde
- * pisa (E/Espaço). Ferramentas ficam numa hotbar inferior; a status bar (dia,
- * energia, indicadores) é uma faixa integrada no topo, sobre o mundo; o
- * inventário é um modal (tecla I).
+ * pisa (E/Espaço) ou interage com locais físicos (casa/banca). Ferramentas
+ * ficam numa hotbar inferior; a status bar (dia, energia, indicadores) é uma
+ * faixa integrada no topo, sobre o mundo; o inventário é um modal (tecla I).
  */
 
 // Mundo maior que a tela (960×640): a câmera segue o jogador e o mapa vai sendo
@@ -24,8 +25,13 @@ const WORLD_W = 1920;
 const WORLD_H = 1408;
 const GRID_OX = Math.round((WORLD_W - 13 * 64) / 2); // 544
 const GRID_OY = 768; // espaço ao norte para casa/cenário
-/** Largura fixa da hotbar (independente da largura do talhão). */
-const SLOT_BAR_W = 512;
+/** Medidas da hotbar pixel UI própria (sem PNG externo). */
+const SLOT_SIZE = 56;
+const SLOT_GAP = 4;
+const SLOT_PAD = 8;
+const SLOT_COUNT = 6;
+const SLOT_BAR_W = SLOT_COUNT * SLOT_SIZE + (SLOT_COUNT - 1) * SLOT_GAP + SLOT_PAD * 2;
+const SLOT_BAR_H = SLOT_SIZE + SLOT_PAD * 2;
 
 // Faixas de profundidade. O fog cobre TODO o mundo (acima de plantas/jogador,
 // cujo depth vai até ~WORLD_H); a UI fica acima do fog; overlays acima de tudo.
@@ -36,6 +42,7 @@ const DEPTH_HELP = 1600;
 const DEPTH_TRANSITION = 5000;
 /** Diâmetro do "pincel" que apaga a névoa ao redor do jogador (raio ~150px). */
 const FOG_BRUSH = 300;
+const PLAYER_FOOT_H = 14;
 
 /** Rótulos amigáveis de itens do inventário (itemId → texto exibido). */
 const ITEM_LABEL: Record<string, string> = {
@@ -47,12 +54,6 @@ let helpAutoShown = false;
 
 type Tool = 'tree' | 'cacao' | 'harvest' | 'prune';
 
-/**
- * Centros-X dos 9 slots como fração da largura da slot_bar (a moldura de madeira
- * faz os slots NÃO serem largura/9). Medidos do PNG; ajuste fino a olho.
- */
-const SLOT_FRACS = [0.065, 0.173, 0.282, 0.39, 0.498, 0.607, 0.716, 0.824, 0.934] as const;
-const SLOT_BAR_RATIO = 750 / 5250; // altura / largura do PNG
 const SLOT_ICON = 40; // px do ícone dentro do slot
 
 /** Definição de um slot da hotbar (ação do jogador simbolizada por ícone/texto). */
@@ -63,6 +64,8 @@ interface SlotDef {
   readonly run?: () => void; // slots de ação imediata (dormir/vender)
   readonly icon?: string; // textura do ícone (estado normal)
   readonly iconSelected?: string; // textura quando selecionado/hover
+  readonly iconW?: number;
+  readonly iconH?: number;
 }
 
 interface SlotUI {
@@ -89,9 +92,11 @@ interface MoveKeys {
 
 export class FarmScene extends Phaser.Scene {
   private farm!: Farm;
+  private settings!: Settings;
   private tool: Tool = 'tree';
   private player!: Player;
   private moveKeys: MoveKeys[] = [];
+  private mouseTarget: Phaser.Math.Vector2 | undefined;
 
   private plantLayer!: Phaser.GameObjects.Container;
   private shadeGfx!: Phaser.GameObjects.Graphics;
@@ -100,6 +105,7 @@ export class FarmScene extends Phaser.Scene {
   private fog!: Phaser.GameObjects.RenderTexture;
   private obstacles: Phaser.Geom.Rectangle[] = [];
   private doorZone!: Phaser.Geom.Rectangle;
+  private saleZone!: Phaser.Geom.Rectangle;
   private transitioning = false;
 
   private dayText!: Phaser.GameObjects.Text;
@@ -109,6 +115,10 @@ export class FarmScene extends Phaser.Scene {
   private endOverlay: Phaser.GameObjects.Container | undefined;
   private invOverlay: Phaser.GameObjects.Container | undefined;
   private helpOverlay: Phaser.GameObjects.Container | undefined;
+  private saleOverlay: Phaser.GameObjects.Container | undefined;
+  private saleFocus: FocusList | undefined;
+  private interactionHint!: Phaser.GameObjects.Text;
+  private toastText!: Phaser.GameObjects.Text;
 
   constructor() {
     super('FarmScene');
@@ -116,12 +126,17 @@ export class FarmScene extends Phaser.Scene {
 
   create(): void {
     this.farm = new Farm();
+    this.settings = loadSettings();
+    applyAccessibilitySettings(this.settings);
     this.tool = 'tree';
     this.indicatorBars = new Map();
     this.slots = [];
     this.endOverlay = undefined;
     this.invOverlay = undefined;
     this.helpOverlay = undefined;
+    this.saleOverlay = undefined;
+    this.saleFocus?.destroy();
+    this.saleFocus = undefined;
     this.obstacles = [];
     this.transitioning = false;
 
@@ -134,8 +149,10 @@ export class FarmScene extends Phaser.Scene {
     this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
 
     this.drawGrassBackground();
-    this.buildDecorations();
+    this.drawPlantableGround();
     this.buildHouse();
+    this.buildMarketStand();
+    this.buildDecorations();
     this.shadeGfx = this.add.graphics().setDepth(-10);
     this.plantLayer = this.add.container(0, 0).setDepth(0);
     this.markerGfx = this.add.graphics().setDepth(1);
@@ -149,12 +166,20 @@ export class FarmScene extends Phaser.Scene {
     this.buildFog();
     this.buildHud();
     this.buildHelpButton();
+    this.buildInteractionText();
     this.buildSlotBar();
     this.bindInput();
     this.redraw();
+    announce(this.settings, 'Jogo iniciado. Use as teclas configuradas, setas como fallback, ou clique no chão para mover.');
+
+    this.events.on(Phaser.Scenes.Events.RESUME, () => {
+      this.settings = loadSettings();
+      applyAccessibilitySettings(this.settings);
+      this.rebuildMoveKeys();
+    });
 
     // Mostra a ajuda automaticamente na primeira vez da sessão (se "Mostrar dicas" ligado).
-    if (!helpAutoShown && loadSettings().showTips) {
+    if (!helpAutoShown && this.settings.showTips) {
       helpAutoShown = true;
       this.toggleHelp();
     }
@@ -162,10 +187,10 @@ export class FarmScene extends Phaser.Scene {
 
   override update(_time: number, deltaMs: number): void {
     // Congela em overlays e durante a transição de dia (entrar na casa).
-    if (this.endOverlay || this.invOverlay || this.helpOverlay || this.transitioning) return;
-    this.player.update(deltaMs, this.readDir());
+    if (this.endOverlay || this.invOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    this.player.update(deltaMs, this.readDir(), this.moveSpeedScale());
     this.revealFog();
-    this.checkDoor();
+    this.updateInteractionText();
     this.drawMarker();
   }
 
@@ -194,6 +219,23 @@ export class FarmScene extends Phaser.Scene {
     }
   }
 
+  /** Tiles plantáveis do talhão: visíveis, mas sem colisão. */
+  private drawPlantableGround(): void {
+    const layer = this.add.container(0, 0).setDepth(-18);
+    for (let y = 0; y < this.farm.grid.height; y++) {
+      for (let x = 0; x < this.farm.grid.width; x++) {
+        const px = GRID_OX + x * TILE;
+        const py = GRID_OY + y * TILE;
+        const tile = this.add.image(px, py, TextureKey.Bed)
+          .setOrigin(0, 0)
+          .setDisplaySize(TILE, TILE)
+          .setAlpha(0.34)
+          .setTint(0xb6965d);
+        layer.add(tile);
+      }
+    }
+  }
+
   /**
    * Decoração de ambiente (pedras, arbustos, flores) espalhada pelo MUNDO, fora
    * do talhão, dando o que revelar ao explorar. Puramente cosmética. Posições
@@ -209,6 +251,10 @@ export class FarmScene extends Phaser.Scene {
 
     const keys = [TextureKey.DecorBush, TextureKey.DecorStone, TextureKey.DecorFlower];
     const layer = this.add.container(0, 0).setDepth(-15); // acima da grama, abaixo das plantas
+    const reserved = [
+      new Phaser.Geom.Rectangle(this.doorZone.x - 190, this.doorZone.y - 140, this.doorZone.width + 380, 330),
+      new Phaser.Geom.Rectangle(this.saleZone.x - 130, this.saleZone.y - 120, this.saleZone.width + 260, 250),
+    ];
     // Gerador determinístico (LCG) → mesmo cenário todo restart.
     let seed = 1337;
     const rnd = (): number => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
@@ -218,33 +264,72 @@ export class FarmScene extends Phaser.Scene {
       if (insidePlot(x, y)) continue; // não polui a área jogável
       const key = keys[Math.floor(rnd() * keys.length)]!;
       const scale = key === TextureKey.DecorFlower ? 2.6 + rnd() * 1.2 : 3 + rnd() * 1.4;
+      const hitW = key === TextureKey.DecorBush ? 22 * scale : 18 * scale;
+      const hitH = key === TextureKey.DecorBush ? 10 * scale : 9 * scale;
+      const hit = new Phaser.Geom.Rectangle(x - hitW / 2, y - hitH, hitW, hitH);
+      if (reserved.some((r) => Phaser.Geom.Rectangle.Overlaps(hit, r))) continue;
+      if (key !== TextureKey.DecorFlower && this.obstacles.some((o) => Phaser.Geom.Rectangle.Overlaps(hit, o))) continue;
       layer.add(this.add.image(x, y, key).setOrigin(0.5, 1).setScale(scale).setDepth(-15));
+      if (key !== TextureKey.DecorFlower) this.obstacles.push(hit);
     }
   }
 
   /**
    * Casa ao norte/nordeste do talhão. Corpo sólido (colisão) + uma "porta" na
-   * base: pisar na porta dispara a transição de dia (ver `enterHouse`). Depth
-   * pela base → o jogador passa na frente/atrás corretamente.
+   * base: estando nela, E/Espaço/Z dispara a transição de dia. Depth pela base
+   * → o jogador passa na frente/atrás corretamente.
    */
   private buildHouse(): void {
-    const src = this.textures.get(TextureKey.House).getSourceImage();
-    const dispH = 360;
+    const src = this.textures.get(TextureKey.CottageClosed).getSourceImage();
+    const dispH = 300;
     const dispW = dispH * (src.width / src.height);
     const baseX = GRID_OX + this.farm.grid.width * TILE * 0.72; // nordeste do talhão
     const baseY = GRID_OY - 210; // ao norte, com folga entre casa e talhão
 
-    this.add.image(baseX, baseY, TextureKey.House)
+    const g = this.add.graphics().setDepth(baseY - 2);
+    g.fillStyle(0x07110a, 0.24).fillEllipse(baseX, baseY - 8, dispW * 0.72, 42);
+    g.fillStyle(0x9b6b3f, 0.75).fillRoundedRect(baseX - 36, baseY - 76, 72, 92, 8);
+
+    this.add.image(baseX, baseY, TextureKey.CottageClosed)
       .setOrigin(0.5, 1)
       .setDisplaySize(dispW, dispH)
       .setDepth(baseY);
 
+    for (let y = baseY + 8; y < GRID_OY + 10; y += TILE) {
+      this.add.image(baseX, y, TextureKey.Bed).setOrigin(0.5, 0.5).setDisplaySize(TILE, TILE * 0.62).setDepth(-14);
+    }
+    this.add.image(baseX - dispW * 0.36, baseY - 6, TextureKey.DecorBush).setOrigin(0.5, 1).setScale(2.6).setDepth(baseY + 1);
+    this.add.image(baseX + dispW * 0.34, baseY - 6, TextureKey.DecorFlower).setOrigin(0.5, 1).setScale(3.2).setDepth(baseY + 1);
+
     // Corpo sólido: cobre paredes/telhado, deixando a base (porta + chão) livre.
     this.obstacles.push(new Phaser.Geom.Rectangle(
-      baseX - dispW * 0.42, baseY - dispH * 0.92, dispW * 0.84, dispH * 0.7,
+      baseX - dispW * 0.44, baseY - dispH * 0.86, dispW * 0.88, dispH * 0.62,
     ));
     // Porta: faixa estreita na base-central; pisar aqui entra na casa.
-    this.doorZone = new Phaser.Geom.Rectangle(baseX - 34, baseY - dispH * 0.22, 68, dispH * 0.22 + 8);
+    this.doorZone = new Phaser.Geom.Rectangle(baseX - 36, baseY - dispH * 0.24, 72, dispH * 0.24 + 10);
+  }
+
+  /** Banca física de venda: aproxima, aperta E/V e abre o menu de vendas. */
+  private buildMarketStand(): void {
+    const baseX = GRID_OX + 112;
+    const baseY = GRID_OY - 28;
+    const standW = 118;
+    const standH = 118;
+
+    const g = this.add.graphics().setDepth(baseY - 3);
+    g.fillStyle(0x07110a, 0.22).fillEllipse(baseX, baseY - 8, standW * 0.82, 26);
+    g.fillStyle(0x9b6b3f, 0.45).fillRoundedRect(baseX - 34, baseY - 8, 68, 68, 8);
+    this.add.image(baseX, baseY, TextureKey.MarketStand)
+      .setOrigin(0.5, 1)
+      .setDisplaySize(standW, standH)
+      .setDepth(baseY);
+    this.add.text(baseX, baseY - standH + 6, 'VENDA', {
+      fontFamily: UI.font, fontSize: UI.size.tiny, color: UI.text.primary,
+      backgroundColor: '#5d3a22',
+    }).setOrigin(0.5).setPadding(4, 2, 4, 2).setDepth(baseY + 1);
+
+    this.obstacles.push(new Phaser.Geom.Rectangle(baseX - 48, baseY - 76, 96, 58));
+    this.saleZone = new Phaser.Geom.Rectangle(baseX - 58, baseY - 20, 116, 70);
   }
 
   // ─── Névoa (fog of war) ─────────────────────────────────────────────────────
@@ -286,43 +371,133 @@ export class FarmScene extends Phaser.Scene {
     this.eraseFog(this.player.worldX, this.player.worldY);
   }
 
-  // ─── Casa (transição de dia) ────────────────────────────────────────────────
+  // ─── Locais interativos ────────────────────────────────────────────────────
 
-  /** Pisou na porta → entra na casa (transição de dia). */
-  private checkDoor(): void {
-    if (this.doorZone.contains(this.player.worldX, this.player.worldY)) this.enterHouse();
+  private nearDoor(): boolean {
+    return this.doorZone.contains(this.player.worldX, this.player.worldY);
   }
 
-  /**
-   * Entrar na casa = dormir: a tela escurece, aparece "No dia seguinte..." nas
-   * fontes pixelizadas, o dia avança (`farm.sleep`) e clareia de volta.
-   */
+  private nearMarket(): boolean {
+    return this.saleZone.contains(this.player.worldX, this.player.worldY);
+  }
+
+  private updateInteractionText(): void {
+    let text = '';
+    if (this.nearDoor()) text = 'E / Espaço: dormir na casa';
+    else if (this.nearMarket()) text = 'E / V: abrir vendas';
+    else if (this.player.onPlot) text = this.tileActionHint();
+    this.interactionHint.setText(text);
+    this.interactionHint.setVisible(text.length > 0 && this.toastText.alpha <= 0.01);
+  }
+
+  private tileActionHint(): string {
+    const tile = this.currentTileView();
+    if (!tile) return '';
+    if (tile.cacao?.harvestable) return this.tool === 'harvest' ? 'E: colher cacau maduro' : '3: selecionar colheita';
+    if (tile.cacao?.dead) return 'Cacau morto: plante outro tile';
+    if (tile.cacao) return `Cacau ${tile.cacao.stage}: durma para crescer`;
+    if (this.tool === 'tree') {
+      const target = this.treeTargetTileView();
+      if (!target) return 'Olhe para um tile do talhão para plantar';
+      return target.kind === 'empty' ? 'E: plantar nativa à frente' : 'Tile à frente ocupado';
+    }
+    if (this.tool === 'cacao') {
+      if (tile.kind !== 'empty') return 'Tile ocupado';
+      if (tile.shadeStatus === 'ideal') return 'E: plantar cacau (sombra ideal)';
+      if (tile.shadeStatus === 'sol_pleno') return 'E: plantar cacau (sol pleno: arriscado)';
+      return 'E: plantar cacau (mata fechada: cresce lento)';
+    }
+    if (this.tool === 'harvest') {
+      return 'Sem cacau para colher';
+    }
+    if (this.tool === 'prune') {
+      if (tile.kind === 'tree' && tile.matureTree && !tile.pruned) return 'E: podar nativa madura';
+      if (tile.kind === 'tree' && tile.pruned) return 'Nativa ja podada';
+      return 'Sem nativa madura para podar';
+    }
+    return '';
+  }
+
+  private currentTileView(): ReturnType<Farm['snapshot']>['tiles'][number] | undefined {
+    if (!this.player.onPlot) return undefined;
+    const c = this.player.tileCoord;
+    return this.tileViewAt(c);
+  }
+
+  private tileViewAt(c: { x: number; y: number }): ReturnType<Farm['snapshot']>['tiles'][number] | undefined {
+    return this.farm.snapshot().tiles.find((t) => t.x === c.x && t.y === c.y);
+  }
+
+  private sameCoord(a: { x: number; y: number }, b: { x: number; y: number }): boolean {
+    return a.x === b.x && a.y === b.y;
+  }
+
+  private treeTargetCoord(): { x: number; y: number } | undefined {
+    if (!this.player.onPlot) return undefined;
+    const c = this.player.tileCoord;
+    const d = this.player.lookDir;
+    const target = { x: c.x + d.x, y: c.y + d.y };
+    if (target.x < 0 || target.y < 0 || target.x >= this.farm.grid.width || target.y >= this.farm.grid.height) {
+      return undefined;
+    }
+    return target;
+  }
+
+  private treeTargetTileView(): ReturnType<Farm['snapshot']>['tiles'][number] | undefined {
+    const c = this.treeTargetCoord();
+    if (!c) return undefined;
+    return this.farm.snapshot().tiles.find((t) => t.x === c.x && t.y === c.y);
+  }
+
+  /** Entrar na casa = dormir: tela noturna opaca, avanço de dia e amanhecer. */
   private enterHouse(): void {
     if (this.transitioning || this.endOverlay) return;
     this.transitioning = true;
     const w = this.scale.width;
     const h = this.scale.height;
-    const black = this.add.rectangle(0, 0, w, h, 0x000000, 1)
-      .setOrigin(0, 0).setScrollFactor(0).setDepth(DEPTH_TRANSITION).setAlpha(0);
-    const msg = this.add.text(w / 2, h / 2, 'No dia seguinte...', {
-      fontFamily: UI.font, fontSize: UI.size.heading, color: UI.text.primary,
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(DEPTH_TRANSITION + 1).setAlpha(0);
+    const overlay = this.add.container(0, 0)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_TRANSITION);
+    const background = this.add.image(w / 2, h / 2, TextureKey.SleepBackgroundStarry);
+    const scale = Math.max(w / background.width, h / background.height) * 1.03;
+    background.setScale(scale);
+    const nightTint = this.add.rectangle(w / 2, h / 2, w, h, 0x07120d, 0.18);
+    const msg = this.add.text(w / 2, h / 2 + 116, 'Boa noite...', {
+      fontFamily: UI.font,
+      fontSize: UI.size.heading,
+      color: '#fff7df',
+    }).setOrigin(0.5).setAlpha(0).setShadow(2, 3, '#132319', 0, true, true);
+    overlay.add([background, nightTint, msg]);
 
     this.tweens.add({
-      targets: black, alpha: 1, duration: 450,
-      onComplete: () => {
-        this.tweens.add({ targets: msg, alpha: 1, duration: 300 });
-        this.farm.sleep(); // avança o dia com a tela preta
-        this.redraw();
-        // Sai pela porta: reposiciona logo abaixo dela p/ não reentrar em loop.
-        this.player.moveTo(this.doorZone.centerX, this.doorZone.bottom + 30);
-        this.time.delayedCall(1300, () => {
-          this.tweens.add({
-            targets: [msg, black], alpha: 0, duration: 450,
-            onComplete: () => { msg.destroy(); black.destroy(); this.transitioning = false; },
-          });
-        });
-      },
+      targets: background,
+      x: background.x + 7,
+      duration: 2600,
+      ease: 'Sine.inOut',
+    });
+    this.tweens.add({ targets: msg, alpha: 1, duration: 320, ease: 'Sine.inOut' });
+
+    this.time.delayedCall(700, () => {
+      msg.setText('Descansando...');
+      this.farm.sleep();
+      this.redraw();
+      // Sai pela porta: reposiciona logo abaixo dela p/ não reentrar em loop.
+      this.player.moveTo(this.doorZone.centerX, this.doorZone.bottom + 30);
+    });
+
+    this.time.delayedCall(1750, () => {
+      msg.setText('Amanhecendo...');
+      this.tweens.add({
+        targets: overlay,
+        alpha: 0,
+        duration: 650,
+        ease: 'Sine.inOut',
+        onComplete: () => {
+          this.tweens.killTweensOf(background);
+          overlay.destroy();
+          this.transitioning = false;
+        },
+      });
     });
   }
 
@@ -362,58 +537,93 @@ export class FarmScene extends Phaser.Scene {
     }).setDepth(DEPTH_HELP).setScrollFactor(0);
   }
 
+  private buildInteractionText(): void {
+    const y = this.scale.height - SLOT_BAR_H - 22;
+    this.interactionHint = this.add.text(this.scale.width / 2, y, '', {
+      fontFamily: UI.font, fontSize: UI.size.small, color: UI.text.primary,
+      backgroundColor: '#05100a',
+    }).setOrigin(0.5).setPadding(8, 4, 8, 4).setScrollFactor(0).setDepth(DEPTH_HELP).setVisible(false);
+    this.toastText = this.add.text(this.scale.width / 2, y - 34, '', {
+      fontFamily: UI.font, fontSize: UI.size.small, color: UI.text.soft,
+      backgroundColor: '#05100a',
+      wordWrap: { width: Math.min(520, this.scale.width - 48) },
+      align: 'center',
+    }).setOrigin(0.5).setPadding(8, 4, 8, 4).setScrollFactor(0).setDepth(DEPTH_HELP).setAlpha(0);
+  }
+
   /** Abre/fecha o modal de ajuda (controles + mecânicas). Congela o mundo. */
   private toggleHelp(): void {
-    if (this.endOverlay) return;
+    if (this.endOverlay || this.saleOverlay || this.invOverlay) return;
     if (this.helpOverlay) {
       this.helpOverlay.destroy();
       this.helpOverlay = undefined;
       return;
     }
-    const panel = new Panel(this, { width: 460, height: 360, title: 'Como jogar' });
+    const panelW = Math.min(560, this.scale.width - 40);
+    const panelH = Math.min(430, this.scale.height - 48);
+    const panel = new Panel(this, { width: panelW, height: panelH, title: 'Como jogar' });
+    const keys = this.settings.keyBindings;
     const blocker = this.add
       .rectangle(0, 0, this.scale.width, this.scale.height, 0xffffff, 0.001)
       .setInteractive();
     blocker.on('pointerdown', () => this.toggleHelp()); // clicar fora fecha
     panel.addContent(
       blocker,
-      this.add.text(0, -24,
-        'WASD / setas: andar (a câmera segue você)\n' +
-        'E / Espaço: usar a ferramenta no tile do talhão\n' +
-        '1-6: escolher skill na hotbar\n' +
-        'Z: dormir   V: vender   I: inventário   ESC: pausar\n\n' +
-        'Explore: o mapa se revela nas bordas.\n' +
-        'Entre na casa (ao norte) para passar o dia.\n' +
+      this.add.text(0, -8,
+        `${keyLabel(keys.moveUp)}${keyLabel(keys.moveLeft)}${keyLabel(keys.moveDown)}${keyLabel(keys.moveRight)} / setas: andar\n` +
+      `${keyLabel(keys.interact)} / Espaço: usar ferramenta, dormir na porta ou vender na banca\n` +
+      '1-6: escolher item na hotbar\n' +
+      `${keyLabel(keys.replant)}: replantar/undo de nativa recém-plantada (custa 2 energia)\n` +
+      `${keyLabel(keys.inventory)}: inventário   ${keyLabel(keys.pause)} / ESC: pausar/fechar\n` +
+      'Mouse: clique no chão para andar; clique nos botões e slots\n\n' +
+        'Casa: fica ao norte e passa o dia.\n' +
+        'Banca: abre o menu de venda de cacau.\n' +
         'Nativas maduras dão sombra aos 8 vizinhos.\n' +
-        'Cacau: sombra 1 = ideal · 0 = morre em 3 dias · 2+ = mais lento.\n' +
-        'Podar: a nativa para de dar sombra — −biodiversidade, +produtividade.',
-        { fontFamily: UI.font, fontSize: UI.size.small, color: UI.text.soft, align: 'center', lineSpacing: 6, wordWrap: { width: 430 } },
+        'Cacau: sombra 1 é ideal; sol pleno mata; mata fechada atrasa.\n' +
+        'Podar troca biodiversidade por produtividade.',
+        {
+          fontFamily: UI.font,
+          fontSize: UI.size.small,
+          color: UI.text.soft,
+          align: 'left',
+          lineSpacing: 7,
+          wordWrap: { width: panelW - 72 },
+        },
       ).setOrigin(0.5),
-      this.add.text(0, 146, 'Clique fora ou ESC para fechar', { fontFamily: UI.font, fontSize: UI.size.tiny, color: UI.text.muted }).setOrigin(0.5),
+      this.add.text(0, panelH / 2 - 30, 'Clique fora ou ESC para fechar', {
+        fontFamily: UI.font, fontSize: UI.size.tiny, color: UI.text.muted,
+      }).setOrigin(0.5),
     );
     panel.setScrollFactor(0);
     this.helpOverlay = panel;
   }
 
-  /** Hotbar estilo Minecraft: 9 slots de skills na moldura de `slot_bar.png`. */
+  /** Hotbar pixel UI própria: 9 slots de ações sem PNG proprietário. */
   private buildSlotBar(): void {
     const barW = SLOT_BAR_W; // largura fixa (não acompanha o talhão largo)
-    const barH = barW * SLOT_BAR_RATIO; // ~73
+    const barH = SLOT_BAR_H;
     const barX = (this.scale.width - barW) / 2; // centralizada
     const barY = this.scale.height - barH - 10; // fixa no rodapé da VIEWPORT
 
     // Container fixo à câmera (a câmera segue o jogador) e acima da névoa.
     const layer = this.add.container(0, 0).setScrollFactor(0).setDepth(DEPTH_SLOTBAR);
-    layer.add(this.add.image(barX, barY, TextureKey.SlotBar).setOrigin(0, 0).setDisplaySize(barW, barH));
+    layer.add(this.add.rectangle(barX, barY, barW, barH, 0x2a1a10).setOrigin(0, 0));
+    layer.add(this.add.rectangle(barX + 3, barY + 3, barW - 6, barH - 6, 0x7b4a27).setOrigin(0, 0));
+    layer.add(this.add.rectangle(barX + 6, barY + 6, barW - 12, barH - 12, 0x3a2418).setOrigin(0, 0));
 
     const defs = this.slotDefs();
-    const cy = barY + barH / 2;
+    const cy = barY + SLOT_PAD + SLOT_SIZE / 2;
     defs.forEach((def, i) => {
-      const cx = barX + SLOT_FRACS[i]! * barW;
+      const sx = barX + SLOT_PAD + i * (SLOT_SIZE + SLOT_GAP);
+      const sy = barY + SLOT_PAD;
+      const cx = sx + SLOT_SIZE / 2;
+      layer.add(this.add.rectangle(sx, sy, SLOT_SIZE, SLOT_SIZE, 0xd1a184).setOrigin(0, 0));
+      layer.add(this.add.rectangle(sx + 4, sy + 4, SLOT_SIZE - 8, SLOT_SIZE - 8, 0x5a3822).setOrigin(0, 0));
+      layer.add(this.add.rectangle(sx + 6, sy + 6, SLOT_SIZE - 12, SLOT_SIZE - 12, 0xe2b79e).setOrigin(0, 0).setAlpha(0.82));
 
       let icon: Phaser.GameObjects.Image | undefined;
       if (def.icon) {
-        icon = this.add.image(cx, cy, def.icon).setDisplaySize(SLOT_ICON, SLOT_ICON);
+        icon = this.add.image(cx, cy, def.icon).setDisplaySize(def.iconW ?? SLOT_ICON, def.iconH ?? SLOT_ICON);
         layer.add(icon);
       } else if (def.kind !== 'empty') {
         layer.add(this.add.text(cx, cy, def.key, {
@@ -426,7 +636,7 @@ export class FarmScene extends Phaser.Scene {
       }).setOrigin(0, 0));
 
       const selector = this.add
-        .rectangle(cx, cy, SLOT_ICON + 12, SLOT_ICON + 12)
+        .rectangle(cx, cy, SLOT_SIZE - 4, SLOT_SIZE - 4)
         .setStrokeStyle(3, 0xffffff, 0.95).setVisible(false);
       layer.add(selector);
 
@@ -435,7 +645,7 @@ export class FarmScene extends Phaser.Scene {
 
       // hitbox transparente clicável cobrindo o slot
       const hit = this.add
-        .rectangle(cx, cy, SLOT_ICON + 16, barH * 0.9, 0xffffff, 0.001)
+        .rectangle(cx, cy, SLOT_SIZE, SLOT_SIZE, 0xffffff, 0.001)
         .setScrollFactor(0).setInteractive({ useHandCursor: def.kind !== 'empty' });
       hit.on('pointerover', () => { ui.hovered = true; this.refreshSlots(); });
       hit.on('pointerout', () => { ui.hovered = false; this.refreshSlots(); });
@@ -446,21 +656,18 @@ export class FarmScene extends Phaser.Scene {
 
   private slotDefs(): SlotDef[] {
     return [
-      { key: 'Nativa', kind: 'tool', tool: 'tree' },
-      { key: 'Cacau', kind: 'tool', tool: 'cacao' },
-      { key: 'Colher', kind: 'tool', tool: 'harvest' },
-      { key: 'Podar', kind: 'tool', tool: 'prune', icon: TextureKey.PodarPrata, iconSelected: TextureKey.PodarPreto },
-      { key: 'Dormir', kind: 'action', run: () => this.doSleep() },
-      { key: 'Vender', kind: 'action', run: () => this.doSell() },
-      { key: '', kind: 'empty' },
-      { key: '', kind: 'empty' },
-      { key: '', kind: 'empty' },
+      { key: 'Nativa', kind: 'tool', tool: 'tree', icon: TextureKey.Seedling, iconW: 22, iconH: 44 },
+      { key: 'Cacau', kind: 'tool', tool: 'cacao', icon: TextureKey.IconCacao },
+      { key: 'Colher', kind: 'tool', tool: 'harvest', icon: TextureKey.IconHarvest },
+      { key: 'Podar', kind: 'tool', tool: 'prune', icon: TextureKey.IconPrune },
+      { key: 'Dormir', kind: 'action', run: () => this.doSleep(), icon: TextureKey.CottageClosed, iconW: 40, iconH: 42 },
+      { key: 'Vender', kind: 'action', run: () => this.doSell(), icon: TextureKey.IconSell },
     ];
   }
 
   /** Escolhe um slot: ferramenta vira ativa; ação imediata executa na hora. */
   private chooseSlot(i: number): void {
-    if (this.endOverlay || this.invOverlay || this.helpOverlay || this.transitioning) return;
+    if (this.endOverlay || this.invOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
     const def = this.slots[i]?.def;
     if (!def) return;
     if (def.kind === 'tool' && def.tool) this.setTool(def.tool);
@@ -471,32 +678,55 @@ export class FarmScene extends Phaser.Scene {
     const kb = this.input.keyboard;
     if (!kb) return;
 
-    // Movimento: setas + WASD (dois conjuntos de teclas).
+    this.rebuildMoveKeys();
+
+    kb.on('keydown', (event: KeyboardEvent) => {
+      if (event.repeat) return;
+      const code = normalizeKeyCode(event);
+      const keys = this.settings.keyBindings;
+      if (code === keys.interact || code === 'SPACE') this.doAction();
+      else if (code === keys.sleep) this.doSleep();
+      else if (code === keys.sell) this.doSell();
+      else if (code === keys.replant) this.doReplant();
+      else if (code === keys.inventory) this.toggleInventory();
+      else if (code === keys.pause || code === 'ESC') {
+        if (this.invOverlay) this.toggleInventory();
+        else if (this.helpOverlay) this.toggleHelp();
+        else if (this.saleOverlay) this.toggleSales();
+        else this.pauseGame();
+      }
+    });
+
+    // Slots 1-9 (estilo Minecraft): seleciona ferramenta ou dispara a ação.
+    const numKeys = ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX'];
+    numKeys.forEach((k, i) => kb.on(`keydown-${k}`, () => this.chooseSlot(i)));
+
+    kb.on('keydown-R', () => this.restart());
+
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (!this.settings.mouseEnabled) return;
+      if (this.endOverlay || this.invOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+      if (pointer.y > this.scale.height - SLOT_BAR_H - 16 || pointer.y < 42) return;
+      const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+      this.mouseTarget = new Phaser.Math.Vector2(world.x, world.y);
+    });
+  }
+
+  private rebuildMoveKeys(): void {
+    const kb = this.input.keyboard;
+    if (!kb) return;
     const cursors = kb.createCursorKeys();
-    const wasd = kb.addKeys({ up: 'W', down: 'S', left: 'A', right: 'D' }) as Record<string, Phaser.Input.Keyboard.Key>;
+    const keys = this.settings.keyBindings;
+    const remapped = kb.addKeys({
+      up: phaserKeyName(keys.moveUp),
+      down: phaserKeyName(keys.moveDown),
+      left: phaserKeyName(keys.moveLeft),
+      right: phaserKeyName(keys.moveRight),
+    }) as Record<string, Phaser.Input.Keyboard.Key>;
     this.moveKeys = [
       { up: cursors.up!, down: cursors.down!, left: cursors.left!, right: cursors.right! },
-      { up: wasd.up!, down: wasd.down!, left: wasd.left!, right: wasd.right! },
+      { up: remapped.up!, down: remapped.down!, left: remapped.left!, right: remapped.right! },
     ];
-
-    // Usar ferramenta no tile onde pisa.
-    kb.on('keydown-E', () => this.doAction());
-    kb.on('keydown-SPACE', () => this.doAction());
-    // Slots 1-9 (estilo Minecraft): seleciona ferramenta ou dispara a ação.
-    const numKeys = ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE'];
-    numKeys.forEach((k, i) => kb.on(`keydown-${k}`, () => this.chooseSlot(i)));
-    // Atalhos diretos das ações imediatas.
-    kb.on('keydown-Z', () => this.doSleep());
-    kb.on('keydown-V', () => this.doSell());
-    kb.on('keydown-R', () => this.restart());
-    // Inventário (modal).
-    kb.on('keydown-I', () => this.toggleInventory());
-    // ESC fecha overlays abertos (inventário/ajuda); senão pausa.
-    kb.on('keydown-ESC', () => {
-      if (this.invOverlay) this.toggleInventory();
-      else if (this.helpOverlay) this.toggleHelp();
-      else this.pauseGame();
-    });
   }
 
   private readDir(): { x: number; y: number } {
@@ -508,22 +738,61 @@ export class FarmScene extends Phaser.Scene {
       if (k.up.isDown) y -= 1;
       if (k.down.isDown) y += 1;
     }
+    if (x !== 0 || y !== 0) {
+      this.mouseTarget = undefined;
+      return { x: Phaser.Math.Clamp(x, -1, 1), y: Phaser.Math.Clamp(y, -1, 1) };
+    }
+    if (this.mouseTarget) {
+      const dx = this.mouseTarget.x - this.player.worldX;
+      const dy = this.mouseTarget.y - this.player.worldY;
+      if (Math.hypot(dx, dy) < 10) {
+        this.mouseTarget = undefined;
+        return { x: 0, y: 0 };
+      }
+      return { x: dx, y: dy };
+    }
     return { x: Phaser.Math.Clamp(x, -1, 1), y: Phaser.Math.Clamp(y, -1, 1) };
+  }
+
+  private moveSpeedScale(): number {
+    return 0.65 + this.settings.mouseSensitivity * 0.75;
   }
 
   // ─── Ações do adapter ───────────────────────────────────────────────────────
 
   private doAction(): void {
-    if (this.endOverlay || this.invOverlay || this.helpOverlay || this.transitioning) return;
+    if (this.endOverlay || this.invOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    if (this.nearDoor()) {
+      this.enterHouse();
+      return;
+    }
+    if (this.nearMarket()) {
+      this.toggleSales();
+      return;
+    }
     if (!this.player.onPlot) return; // fora do talhão não há tile p/ agir
-    const c = this.player.tileCoord;
+    const c = this.tool === 'tree' ? this.treeTargetCoord() : this.player.tileCoord;
+    if (!c) {
+      this.showToast('Olhe para um tile do talhão para plantar nativa.');
+      return;
+    }
+    if (this.tool === 'tree' && this.sameCoord(c, this.player.tileCoord)) {
+      this.showToast('Saia desse tile ou olhe para um tile vizinho para plantar a nativa.');
+      return;
+    }
+    const before = this.tileViewAt(c);
+    let ok = false;
     switch (this.tool) {
-      case 'tree': this.farm.plantTree(c); break;
-      case 'cacao': this.farm.plantCacao(c); break;
-      case 'harvest': this.farm.harvest(c); break;
-      case 'prune': this.farm.prune(c); break;
+      case 'tree':
+        ok = this.farm.plantTree(c);
+        if (ok) this.nudgePlayerAwayFromTree(c);
+        break;
+      case 'cacao': ok = this.farm.plantCacao(c); break;
+      case 'harvest': ok = this.farm.harvest(c); break;
+      case 'prune': ok = this.farm.prune(c); break;
     }
     this.redraw();
+    this.showActionFeedback(ok, before);
   }
 
   private setTool(tool: Tool): void {
@@ -531,16 +800,64 @@ export class FarmScene extends Phaser.Scene {
     this.refreshSlots();
   }
 
+  private doReplant(): void {
+    if (this.endOverlay || this.invOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    const c = this.findReplantCandidate();
+    if (!c) {
+      this.showToast('Nenhuma nativa recém-plantada por perto para replantar.');
+      return;
+    }
+    if (this.farm.replantTree(c)) {
+      this.redraw();
+      this.showToast('Nativa replantada/desfeita. Energia -2.');
+    } else {
+      this.showToast('Replantar custa 2 de energia e só vale para nativa jovem.');
+    }
+  }
+
+  private nudgePlayerAwayFromTree(c: { x: number; y: number }): void {
+    const foot = new Phaser.Geom.Rectangle(
+      this.player.worldX - PLAYER_W / 2,
+      this.player.worldY - PLAYER_FOOT_H,
+      PLAYER_W,
+      PLAYER_FOOT_H,
+    );
+    const trunk = this.treeTrunkRect(c, false);
+    if (!Phaser.Geom.Rectangle.Overlaps(foot, trunk)) return;
+
+    const current = this.player.tileCoord;
+    const safeX = GRID_OX + current.x * TILE + TILE / 2;
+    const safeY = GRID_OY + current.y * TILE + TILE / 2;
+    this.player.moveTo(safeX, safeY);
+  }
+
+  private treeTrunkRect(c: { x: number; y: number }, mature: boolean): Phaser.Geom.Rectangle {
+    const trunkW = mature ? 28 : 18;
+    const trunkH = mature ? 22 : 12;
+    return new Phaser.Geom.Rectangle(
+      GRID_OX + c.x * TILE + TILE / 2 - trunkW / 2,
+      GRID_OY + c.y * TILE + TILE - trunkH,
+      trunkW,
+      trunkH,
+    );
+  }
+
   private doSleep(): void {
-    if (this.endOverlay || this.invOverlay || this.helpOverlay || this.transitioning) return;
-    this.farm.sleep();
-    this.redraw();
+    if (this.endOverlay || this.invOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    if (!this.nearDoor()) {
+      this.showToast('Vá até a porta da casa para dormir.');
+      return;
+    }
+    this.enterHouse();
   }
 
   private doSell(): void {
-    if (this.endOverlay || this.invOverlay || this.helpOverlay || this.transitioning) return;
-    this.farm.sell(ITEM_CACAU_FRESCO, this.farm.inventory.count(ITEM_CACAU_FRESCO));
-    this.redraw();
+    if (this.endOverlay || this.invOverlay || this.helpOverlay || this.saleOverlay || this.transitioning) return;
+    if (!this.nearMarket()) {
+      this.showToast('Vá até a banca para vender cacau.');
+      return;
+    }
+    this.toggleSales();
   }
 
   private pauseGame(): void {
@@ -555,11 +872,109 @@ export class FarmScene extends Phaser.Scene {
     this.scene.restart();
   }
 
+  private findReplantCandidate(): { x: number; y: number } | undefined {
+    if (!this.player.onPlot) return undefined;
+    const c = this.player.tileCoord;
+    const candidates = [
+      c,
+      { x: c.x, y: c.y - 1 },
+      { x: c.x + 1, y: c.y },
+      { x: c.x, y: c.y + 1 },
+      { x: c.x - 1, y: c.y },
+    ];
+    for (const v of candidates) {
+      if (v.x < 0 || v.y < 0 || v.x >= this.farm.grid.width || v.y >= this.farm.grid.height) continue;
+      const tile = this.farm.grid.tileAt(v);
+      if (tile.kind === 'tree' && !this.farm.grid.isMatureTree(v)) return v;
+    }
+    return undefined;
+  }
+
+  // ─── Vendas (modal da banca) ────────────────────────────────────────────────
+
+  private toggleSales(): void {
+    if (this.endOverlay) return;
+    if (this.saleOverlay) {
+      this.closeSales();
+      return;
+    }
+    this.saleOverlay = this.buildSalesMenu();
+  }
+
+  private closeSales(): void {
+    this.saleFocus?.destroy();
+    this.saleFocus = undefined;
+    this.saleOverlay?.destroy();
+    this.saleOverlay = undefined;
+  }
+
+  private buildSalesMenu(): Phaser.GameObjects.Container {
+    const qty = this.farm.inventory.count(ITEM_CACAU_FRESCO);
+    const panelW = Math.min(420, this.scale.width - 40);
+    const panel = new Panel(this, { width: panelW, height: 300, title: 'Banca de vendas' });
+    panel.setScrollFactor(0);
+
+    const blocker = this.add
+      .rectangle(0, 0, this.scale.width, this.scale.height, 0xffffff, 0.001)
+      .setInteractive();
+    blocker.on('pointerdown', () => this.toggleSales());
+    panel.addContent(blocker);
+
+    panel.addContent(
+      this.add.image(-92, -36, TextureKey.IconCacao).setDisplaySize(48, 48),
+      this.add.text(-44, -46, 'Cacau fresco', {
+        fontFamily: UI.font, fontSize: UI.size.body, color: UI.text.primary,
+      }).setOrigin(0, 0.5),
+      this.add.text(-44, -20, `Disponivel: x${qty}`, {
+        fontFamily: UI.font, fontSize: UI.size.small, color: UI.text.soft,
+      }).setOrigin(0, 0.5),
+      this.add.text(0, 26, 'Cada unidade aumenta Economia e Comunidade.', {
+        fontFamily: UI.font,
+        fontSize: UI.size.small,
+        color: UI.text.muted,
+        align: 'center',
+        wordWrap: { width: panelW - 64 },
+      }).setOrigin(0.5),
+    );
+
+    const sellButton = new Button(this, {
+      x: 0, y: 84, width: 220, height: 44,
+      label: 'Vender tudo',
+      variant: 'primary',
+      onClick: () => {
+        const sold = this.farm.sell(ITEM_CACAU_FRESCO, this.farm.inventory.count(ITEM_CACAU_FRESCO));
+        this.closeSales();
+        this.time.delayedCall(0, () => {
+          this.redraw();
+          this.showToast(sold > 0 ? `Vendido: ${sold} cacau. Ciclo completo!` : 'Sem cacau para vender.');
+        });
+      },
+    }).setEnabled(qty > 0);
+    const closeButton = new Button(this, {
+      x: 0, y: 136, width: 180, height: 36,
+      label: 'Fechar [ESC]',
+      fontSize: UI.size.body,
+      onClick: () => this.toggleSales(),
+    });
+    panel.addContent(sellButton, closeButton);
+    this.saleFocus = new FocusList(this, [
+      {
+        label: qty > 0 ? 'Vender tudo' : 'Vender tudo indisponível',
+        enabled: () => sellButton.enabled,
+        onFocus: (v) => sellButton.setFocused(v),
+        onActivate: () => sellButton.activate(),
+      },
+      { label: 'Fechar vendas', onFocus: (v) => closeButton.setFocused(v), onActivate: () => closeButton.activate() },
+    ], (message) => announce(this.settings, message));
+    announce(this.settings, 'Banca de vendas aberta. Use setas, Enter ou Espaço.');
+    return panel;
+  }
+
   // ─── Inventário (modal) ───────────────────────────────────────────────────────
 
   /** Abre/fecha o inventário. Enquanto aberto, o mundo fica congelado. */
   private toggleInventory(): void {
-    if (this.endOverlay) return;
+    if (this.endOverlay || this.saleOverlay || this.helpOverlay) return;
     if (this.invOverlay) {
       this.invOverlay.destroy();
       this.invOverlay = undefined;
@@ -615,7 +1030,8 @@ export class FarmScene extends Phaser.Scene {
   private drawMarker(): void {
     this.markerGfx.clear();
     if (!this.player.onPlot) return; // sem tile-alvo fora do talhão
-    const c = this.player.tileCoord;
+    const c = this.tool === 'tree' ? this.treeTargetCoord() : this.player.tileCoord;
+    if (!c) return;
     const px = GRID_OX + c.x * TILE;
     const py = GRID_OY + c.y * TILE;
     this.markerGfx.lineStyle(2, 0xffffff, 0.65).strokeRect(px + 2, py + 2, TILE - 4, TILE - 4);
@@ -685,29 +1101,85 @@ export class FarmScene extends Phaser.Scene {
     const w = this.scale.width;
     const h = this.scale.height;
     const won = phase === 'vitoria';
+    const titleText = won ? 'VITÓRIA' : 'DERROTA';
+    const subText = won ? 'Você prosperou mantendo o equilíbrio!' : 'O equilíbrio se rompeu.';
     const bg = this.add.rectangle(w / 2, h / 2, w, h, 0x05100a, 0.85);
-    const title = this.add.text(w / 2, h / 2 - 90, won ? 'VITÓRIA' : 'DERROTA', {
-      fontFamily: 'monospace', fontSize: '52px', color: won ? '#7be08a' : '#ff6a4d',
+    const title = this.add.text(w / 2, h / 2 - 90, titleText, {
+      fontFamily: 'monospace', fontSize: UI.size.title, color: won ? '#7be08a' : '#ff6a4d',
     }).setOrigin(0.5);
-    const sub = this.add.text(w / 2, h / 2 - 34,
-      won ? 'Você prosperou mantendo o equilíbrio!' : 'O equilíbrio se rompeu.',
-      { fontFamily: 'monospace', fontSize: '16px', color: '#cfe3cf' }).setOrigin(0.5);
+    const sub = this.add.text(w / 2, h / 2 - 34, subText, {
+        fontFamily: 'monospace', fontSize: UI.size.body, color: '#cfe3cf',
+        align: 'center', wordWrap: { width: Math.min(560, w - 64) },
+      }).setOrigin(0.5);
     const stats = INDICATOR_META
       .map((m) => `${m.label}: ${Math.round(indicators[m.key])}`)
-      .join('    ');
+      .join('\n');
     const statsText = this.add.text(w / 2, h / 2 + 6, stats, {
-      fontFamily: 'monospace', fontSize: '14px', color: '#a9c9ac',
+      fontFamily: 'monospace', fontSize: UI.size.small, color: '#a9c9ac', align: 'center', lineSpacing: 4,
     }).setOrigin(0.5);
     const btn = this.add.text(w / 2, h / 2 + 70, '  Reiniciar [R]  ', {
       fontFamily: 'monospace', fontSize: '20px', color: '#0d1f13', backgroundColor: '#7bd06a',
     }).setOrigin(0.5).setPadding(8).setInteractive({ useHandCursor: true });
     btn.on('pointerdown', () => this.restart());
     this.endOverlay = this.add.container(0, 0, [bg, title, sub, statsText, btn]).setDepth(2000).setScrollFactor(0);
+    announce(this.settings, `${titleText}. ${subText}. Pressione R para reiniciar.`);
   }
 
   // ─── Helpers de UI ──────────────────────────────────────────────────────────
 
-  /** Atualiza o realce do slot ativo e o ícone de estado (poda prata↔preto). */
+  private showActionFeedback(ok: boolean, before: ReturnType<Farm['snapshot']>['tiles'][number] | undefined): void {
+    if (ok) {
+      switch (this.tool) {
+        case 'tree':
+          this.showToast('Nativa plantada. Ela amadurece com os dias.');
+          return;
+        case 'cacao':
+          this.showToast('Cacau plantado. Durma alguns dias e volte para colher.');
+          return;
+        case 'harvest':
+          this.showToast(`Cacau colhido: x${this.farm.inventory.count(ITEM_CACAU_FRESCO)} no inventario.`);
+          return;
+        case 'prune':
+          this.showToast('Nativa podada: menos sombra, mais produtividade ao redor.');
+          return;
+      }
+    }
+
+    if (this.farm.energy <= 0) {
+      this.showToast('Sem energia. Va dormir na casa.');
+      return;
+    }
+    if (!before) return;
+    if ((this.tool === 'tree' || this.tool === 'cacao') && before.kind !== 'empty') {
+      this.showToast('Esse tile ja esta ocupado.');
+      return;
+    }
+    if (this.tool === 'harvest') {
+      if (before.cacao?.dead) this.showToast('Esse cacau morreu. Plante outro sob sombra ideal.');
+      else if (before.cacao) this.showToast('Esse cacau ainda nao esta maduro. Durma mais um dia.');
+      else this.showToast('Nao ha cacau para colher aqui.');
+      return;
+    }
+    if (this.tool === 'prune') {
+      this.showToast('So nativas maduras podem ser podadas.');
+    }
+  }
+
+  private showToast(message: string): void {
+    announce(this.settings, message);
+    this.interactionHint.setVisible(false);
+    this.toastText.setText(message).setAlpha(1);
+    this.tweens.killTweensOf(this.toastText);
+    this.tweens.add({
+      targets: this.toastText,
+      alpha: 0,
+      duration: 350,
+      delay: 1500,
+      onComplete: () => this.updateInteractionText(),
+    });
+  }
+
+  /** Atualiza o realce do slot ativo e os estados visuais dos ícones. */
   private refreshSlots(): void {
     for (const s of this.slots) {
       const selected = s.def.kind === 'tool' && s.def.tool === this.tool;
@@ -715,7 +1187,8 @@ export class FarmScene extends Phaser.Scene {
       if (s.icon && s.def.icon) {
         const useSelected = selected || s.hovered;
         s.icon.setTexture(useSelected && s.def.iconSelected ? s.def.iconSelected : s.def.icon);
-        s.icon.setDisplaySize(SLOT_ICON, SLOT_ICON);
+        s.icon.setDisplaySize(s.def.iconW ?? SLOT_ICON, s.def.iconH ?? SLOT_ICON);
+        s.icon.setAlpha(s.def.kind === 'empty' ? 0.35 : 1);
       }
     }
   }

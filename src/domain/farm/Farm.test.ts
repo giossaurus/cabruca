@@ -20,14 +20,14 @@ function plantTreesAround(farm: Farm, center: { x: number; y: number }, n: numbe
 
 describe('Farm — energia', () => {
   it('plantar consome energia', () => {
-    const farm = new Farm({ startEnergy: 3, energyCost: { plantTree: 1, plantCacao: 1, harvest: 1, prune: 1 } });
+    const farm = new Farm({ startEnergy: 3, energyCost: { plantTree: 1, plantCacao: 1, harvest: 1, prune: 1, replantTree: 2 } });
     expect(farm.energy).toBe(3);
     farm.plantTree({ x: 0, y: 0 });
     expect(farm.energy).toBe(2);
   });
 
   it('não age sem energia suficiente', () => {
-    const farm = new Farm({ startEnergy: 1, energyCost: { plantTree: 1, plantCacao: 1, harvest: 1, prune: 1 } });
+    const farm = new Farm({ startEnergy: 1, energyCost: { plantTree: 1, plantCacao: 1, harvest: 1, prune: 1, replantTree: 2 } });
     expect(farm.plantTree({ x: 0, y: 0 })).toBe(true);
     expect(farm.energy).toBe(0);
     expect(farm.plantTree({ x: 1, y: 0 })).toBe(false); // sem energia
@@ -71,6 +71,26 @@ describe('Farm — cacau × sombra', () => {
 });
 
 describe('Farm — colheita e venda', () => {
+  it('fecha o ciclo plantio → crescimento → colheita → venda do cacau', () => {
+    const farm = new Farm({
+      startEnergy: 60, totalDays: 40, daysPerCacaoStage: 1, treeMaturityDays: 1, initialTrees: [],
+    });
+    const center = { x: 4, y: 4 };
+    plantTreesAround(farm, center, 1);
+    farm.sleep();
+
+    expect(farm.plantCacao(center)).toBe(true);
+    for (let i = 0; i < 3; i++) farm.sleep();
+    expect(farm.harvest(center)).toBe(true);
+    expect(farm.inventory.count(ITEM_CACAU_FRESCO)).toBe(1);
+
+    const eco0 = farm.indicators.get('economia');
+    const sold = farm.sell(ITEM_CACAU_FRESCO, farm.inventory.count(ITEM_CACAU_FRESCO));
+    expect(sold).toBe(1);
+    expect(farm.inventory.count(ITEM_CACAU_FRESCO)).toBe(0);
+    expect(farm.indicators.get('economia')).toBeGreaterThan(eco0);
+  });
+
   it('colher enche o inventário e libera o tile', () => {
     const farm = new Farm({
       startEnergy: 60, totalDays: 40, daysPerCacaoStage: 1, treeMaturityDays: 1, initialTrees: [],
@@ -180,6 +200,25 @@ describe('Farm — poda', () => {
     const view = farm.snapshot().tiles.find((t) => t.x === 3 && t.y === 3);
     expect(view?.pruned).toBe(true);
     expect(view?.matureTree).toBe(true);
+  });
+});
+
+describe('Farm — replantio de nativa', () => {
+  it('remove uma nativa imatura e cobra 2 de energia', () => {
+    const farm = new Farm({ startEnergy: 5, initialTrees: [] });
+    expect(farm.plantTree({ x: 2, y: 2 })).toBe(true);
+    expect(farm.energy).toBe(4);
+    expect(farm.replantTree({ x: 2, y: 2 })).toBe(true);
+    expect(farm.energy).toBe(2);
+    expect(farm.grid.isEmpty({ x: 2, y: 2 })).toBe(true);
+  });
+
+  it('não remove nativa madura, cacau ou tile vazio', () => {
+    const farm = new Farm({ startEnergy: 10, treeMaturityDays: 1, initialTrees: [{ x: 1, y: 1 }] });
+    farm.plantCacao({ x: 2, y: 2 });
+    expect(farm.replantTree({ x: 1, y: 1 })).toBe(false);
+    expect(farm.replantTree({ x: 2, y: 2 })).toBe(false);
+    expect(farm.replantTree({ x: 3, y: 3 })).toBe(false);
   });
 });
 

@@ -45,6 +45,7 @@ export interface BalanceConfig {
     readonly plantCacao: number;
     readonly harvest: number;
     readonly prune: number;
+    readonly replantTree: number;
   };
   /** Deltas de indicador aplicados por ação. */
   readonly deltas: {
@@ -53,6 +54,8 @@ export interface BalanceConfig {
     readonly harvest: IndicatorDelta;
     /** Podar reduz a biodiversidade (a árvore fica estressada). */
     readonly prune: IndicatorDelta;
+    /** Replantar/undo de nativa recém-plantada custa energia, sem bônus. */
+    readonly replantTree: IndicatorDelta;
     /** Por unidade vendida. */
     readonly sellPerUnit: IndicatorDelta;
   };
@@ -95,6 +98,7 @@ export const DEFAULT_BALANCE: BalanceConfig = {
     plantCacao: 1,
     harvest: 1,
     prune: 1,
+    replantTree: 2,
   },
   deltas: {
     // Plantar nativa fortalece a biodiversidade.
@@ -105,6 +109,7 @@ export const DEFAULT_BALANCE: BalanceConfig = {
     harvest: { economia: 1 },
     // Podar estressa a árvore e reduz a biodiversidade (número de teste).
     prune: { biodiversidade: -2 },
+    replantTree: {},
     // Vender: economia sobe; vender/escoar à comunidade dá um bônus menor.
     sellPerUnit: { economia: 4, comunidade: 1 },
   },

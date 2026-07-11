@@ -18,6 +18,7 @@ export class Toggle extends Phaser.GameObjects.Container {
   private readonly mark: Phaser.GameObjects.Rectangle;
   private readonly onChange: (value: boolean) => void;
   private _value: boolean;
+  private focused = false;
 
   constructor(scene: Phaser.Scene, cfg: ToggleConfig) {
     super(scene, cfg.x, cfg.y);
@@ -53,6 +54,13 @@ export class Toggle extends Phaser.GameObjects.Container {
     this._value = v;
     this.mark.setVisible(v);
     this.box.setFillStyle(v ? UI.color.panelHover : UI.color.panel);
+    this.box.setStrokeStyle(this.focused ? 4 : 2, this.focused ? UI.color.primaryHover : UI.color.stroke);
     this.onChange(v);
+  }
+
+  setFocused(focused: boolean): this {
+    this.focused = focused;
+    this.box.setStrokeStyle(focused ? 4 : 2, focused ? UI.color.primaryHover : UI.color.stroke);
+    return this;
   }
 }

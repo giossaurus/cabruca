@@ -173,6 +173,21 @@ export class Farm {
   }
 
   /**
+   * Replanta/desfaz uma nativa recém-plantada. É uma correção de erro de
+   * posicionamento, por isso só vale para árvore ainda imatura e cobra 2 energia.
+   */
+  replantTree(c: Coord): boolean {
+    const cost = this.config.energyCost.replantTree;
+    if (this._phase !== 'jogando' || this._energy < cost || !this.grid.inBounds(c)) return false;
+    const tile = this.grid.tileAt(c);
+    if (tile.kind !== 'tree' || this.grid.isMatureTree(c)) return false;
+    this.grid.remove(c);
+    this.spend(cost);
+    this.indicators.apply(this.config.deltas.replantTree);
+    return true;
+  }
+
+  /**
    * Vende itens do inventário. Não custa energia. Move Economia (e Comunidade).
    * Retorna quantas unidades foram efetivamente vendidas.
    */

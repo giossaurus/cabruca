@@ -11,5 +11,16 @@ export { StatBar } from './StatBar';
 export type { StatBarConfig } from './StatBar';
 export { Panel } from './Panel';
 export type { PanelConfig } from './Panel';
-export { loadSettings, saveSettings } from './settings';
-export type { Settings } from './settings';
+export { FocusList } from './focus';
+export type { FocusItem } from './focus';
+export {
+  ACTION_LABEL,
+  DEFAULT_KEY_BINDINGS,
+  keyLabel,
+  loadSettings,
+  normalizeKeyCode,
+  phaserKeyName,
+  resetKeyBindings,
+  saveSettings,
+} from './settings';
+export type { ActionId, ColorFilter, DisplayMode, KeyBindings, Settings } from './settings';

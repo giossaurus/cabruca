@@ -12,8 +12,8 @@ import {
  * Sprite animado direcional (pack Farm Life): idle/walk para baixo, cima e lado
  * (esquerda = lado espelhado). Movimento livre em pixels (8 direções) por TODO o
  * MUNDO (não só o talhão) — a câmera segue o jogador e o mapa vai sendo revelado.
- * Colisões: bordas do mundo, árvores nativas maduras (só dentro do talhão) e
- * obstáculos fixos (ex.: a casa). Cacau e mudas são "pisáveis".
+ * Colisões: bordas do mundo, footprints de árvores nativas (tronco, não a copa)
+ * e obstáculos fixos (ex.: a casa). Cacau e chão plantável são "pisáveis".
  */
 
 /** Talhão jogável (grade do domínio) em coordenadas de tile/pixel. */
@@ -72,6 +72,11 @@ export class Player {
 
   get worldX(): number { return this.px; }
   get worldY(): number { return this.py; }
+  get lookDir(): Dir {
+    if (this.facing === 'side') return { x: this.sprite.flipX ? -1 : 1, y: 0 };
+    if (this.facing === 'up') return { x: 0, y: -1 };
+    return { x: 0, y: 1 };
+  }
 
   /** True quando os pés estão dentro do talhão jogável. */
   get onPlot(): boolean {
@@ -96,7 +101,7 @@ export class Player {
     this.sprite.setPosition(x, y).setDepth(y);
   }
 
-  update(deltaMs: number, dir: Dir): void {
+  update(deltaMs: number, dir: Dir, speedScale = 1): void {
     let dx = dir.x;
     let dy = dir.y;
     if (dx === 0 && dy === 0) {
@@ -118,7 +123,7 @@ export class Player {
     const len = Math.hypot(dx, dy);
     dx /= len;
     dy /= len;
-    const dist = SPEED * (deltaMs / 1000);
+    const dist = SPEED * speedScale * (deltaMs / 1000);
     // movimento por eixo → deslizar ao longo de obstáculos.
     this.moveAxis(dx * dist, 0);
     this.moveAxis(0, dy * dist);
@@ -136,7 +141,6 @@ export class Player {
   }
 
   private moveAxis(mx: number, my: number): void {
-    const cur = this.tileCoord;
     const nx = Phaser.Math.Clamp(
       this.px + mx,
       this.world.x + PLAYER_W / 2,
@@ -152,13 +156,31 @@ export class Player {
     for (const o of this.obstacles) {
       if (Phaser.Geom.Rectangle.Overlaps(foot, o)) return;
     }
-    // Bloqueia ao ENTRAR num tile de árvore madura DIFERENTE do atual, apenas
-    // se o destino cair dentro do talhão (fora dele não há árvores de domínio).
+    // Árvores do talhão bloqueiam pelo tronco/base, não pelo tile inteiro. Isso
+    // permite passar perto da copa sem sentir uma parede invisível.
     const tx = Math.floor((nx - this.plot.ox) / TILE);
     const ty = Math.floor((ny - this.plot.oy) / TILE);
     const inPlot = tx >= 0 && tx < this.plot.cols && ty >= 0 && ty < this.plot.rows;
-    const enteringNewTile = tx !== cur.x || ty !== cur.y;
-    if (inPlot && enteringNewTile && this.farm.grid.isMatureTree({ x: tx, y: ty })) return;
+    if (inPlot) {
+      for (let yy = ty - 1; yy <= ty + 1; yy++) {
+        for (let xx = tx - 1; xx <= tx + 1; xx++) {
+          if (xx < 0 || yy < 0 || xx >= this.plot.cols || yy >= this.plot.rows) continue;
+          const c = { x: xx, y: yy };
+          const tile = this.farm.grid.tileAt(c);
+          if (tile.kind !== 'tree') continue;
+          const mature = this.farm.grid.isMatureTree(c);
+          const trunkW = mature ? 28 : 18;
+          const trunkH = mature ? 22 : 12;
+          const trunk = new Phaser.Geom.Rectangle(
+            this.plot.ox + xx * TILE + TILE / 2 - trunkW / 2,
+            this.plot.oy + yy * TILE + TILE - trunkH,
+            trunkW,
+            trunkH,
+          );
+          if (Phaser.Geom.Rectangle.Overlaps(foot, trunk)) return;
+        }
+      }
+    }
     this.px = nx;
     this.py = ny;
   }
