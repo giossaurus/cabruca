@@ -20,7 +20,7 @@ export class SplashScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDisplaySize(420, 252)
       .setAlpha(0);
-    const team = this.add.text(w / 2, h / 2 - 8, 'Equipe\nFabrine Vitoria\nMaria Clara Barros\nGiovanni Della Dea', {
+    const team = this.add.text(w / 2, h / 2 - 8, 'Equipe:\nFabrine Vitoria\nMaria Clara Barros\nGiovanni Della Dea', {
       fontFamily: '"RoadPixel", monospace',
       fontSize: UI.size.heading,
       color: UI.text.primary,
