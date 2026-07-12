@@ -776,7 +776,7 @@ export class FarmScene extends Phaser.Scene {
     }
 
     if (this.farm.energy <= 0) {
-      this.hud.showToast('Sem energia. Va dormir na casa.');
+      this.hud.showToast('Sem energia. Você precisa descansar!');
       return;
     }
     if (!before) return;
@@ -785,13 +785,13 @@ export class FarmScene extends Phaser.Scene {
       return;
     }
     if (this.tool === 'harvest') {
-      if (before.cacao?.dead) this.hud.showToast('Esse cacau morreu. Plante outro sob sombra ideal.');
-      else if (before.cacao) this.hud.showToast('Esse cacau ainda nao esta maduro. Durma mais um dia.');
+      if (before.cacao?.dead) this.hud.showToast('Esse cacau morreu. Plante outro sob uma sombra ideal.');
+      else if (before.cacao) this.hud.showToast('Esse cacau ainda nao esta maduro. Descanse mais um dia.');
       else this.hud.showToast('Nao ha cacau para colher aqui.');
       return;
     }
     if (this.tool === 'prune') {
-      this.hud.showToast('So nativas maduras podem ser podadas.');
+      this.hud.showToast('Somente nativas maduras podem ser podadas.');
     }
   }
 }
