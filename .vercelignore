@@ -1,0 +1,9 @@
+# Nada disto é necessário para o build web no Vercel (que roda `npm run build`).
+# Evita subir os instaladores do Electron (~GB) e artefatos locais.
+node_modules
+release
+dist
+coverage
+.vite
+electron
+*.log

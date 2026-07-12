@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cabruca — Game Jam "Aqui é BR"</title>
+    <!-- Favicon = mesmo ícone do app (Windows/.ico) + PNG p/ navegadores modernos.
+         Caminhos relativos (base './') funcionam tanto no Vercel quanto sob file://. -->
+    <link rel="icon" type="image/x-icon" href="./favicon.ico" />
+    <link rel="icon" type="image/png" sizes="1024x1024" href="./icon.png" />
+    <link rel="apple-touch-icon" href="./icon.png" />
     <style>
       /* A fonte 'RoadPixel' é registrada por JS (ver src/game/font.ts) para que a
          URL seja relativa e funcione sob file:// no Electron. */
